@@ -1,5 +1,11 @@
 # Jader-Market implementation plan
 
+## Confirmed first-version scope
+
+The operator confirmed that this is a small closed community, the operator is the sole oracle, no disputes are needed, and balances can be handled offline. These choices override the broader roadmap below for the first version.
+
+The first version targets administrator-created accounts, binary markets, internal balances, complete-set minting, a simple order book, participant portfolios, direct administrator resolution, and confirmed offline balance adjustments. There is no challenge window, second resolver, public registration, automated liquidity, community discussion, or multi-outcome trading in this version. The broader features below remain optional future work.
+
 ## 1. Goal and prototype boundary
 
 Build a practical prediction market application called **Jader-Market**, inspired by Polymarket's market browsing, outcome trading, order books, and portfolio experience. Implement original branding and interfaces.
