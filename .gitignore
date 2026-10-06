@@ -25,6 +25,7 @@ logs/
 # Dependencies and generated artifacts
 node_modules/
 .next/
+next-env.d.ts
 dist/
 build/
 coverage/
