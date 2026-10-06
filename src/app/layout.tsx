@@ -13,7 +13,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <a className="skip-link" href="#main">Skip to content</a>
     <header className="site-header"><div className="header-inner">
       <Link href="/" className="brand"><span className="brand-mark">J</span>Jader<span className="muted">Market</span></Link>
-      <nav aria-label="Main navigation"><Link href="/">Markets</Link><Link href="/portfolio">Portfolio</Link><Link href="/account">Account</Link><Link href="/admin">Admin</Link></nav>
+      <nav aria-label="Main navigation"><Link href="/">Markets</Link><Link href="/demo">Try demo</Link><Link href="/portfolio">Portfolio</Link><Link href="/account">Account</Link><Link href="/admin">Admin</Link></nav>
       <span className="badge">Prototype</span>
     </div></header>
     <main id="main" className="container">{children}</main>

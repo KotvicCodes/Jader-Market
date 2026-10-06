@@ -4,6 +4,12 @@ A prediction market prototype inspired by Polymarket for a small closed communit
 
 **Status:** runnable application foundation. Published-market browsing, search, filtering, pagination, detail pages, migrations, synthetic fixtures, and health checks are implemented. Authentication, balances, trading, and resolution are not enabled yet.
 
+## Try the demo
+
+Open `http://localhost:3000/demo` after starting the app. This demo works without PostgreSQL or an account and has three fictional markets, sample probability charts, and practice buy/sell controls. Each market starts with 1,000 temporary demo credits. Choose an outcome, enter a whole number of shares, and submit a practice trade to see the balance and positions update. Selling only allows shares you already hold.
+
+Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. These examples demonstrate the interface; actual accounts, trading, offline funding, and oracle settlement remain the next implementation milestones.
+
 ## Implementation plan
 
 Read [the implementation plan](docs/IMPLEMENTATION_PLAN.md) for the product scope, trading rules, architecture, data model, security requirements, milestones, and acceptance criteria.
