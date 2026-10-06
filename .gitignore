@@ -1,0 +1,41 @@
+# Local agent instructions and tooling
+AGENTS.md
+CLAUDE.md
+**/AGENTS.md
+**/CLAUDE.md
+.claude/
+.codex/
+.agents/
+.cursor/
+.agent/
+
+# Credentials and private local data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+data/
+backups/
+exports/
+uploads/
+logs/
+*.log
+
+# Dependencies and generated artifacts
+node_modules/
+.next/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+.cache/
+*.tsbuildinfo
+
+# Local tools and operating system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+tmp/
