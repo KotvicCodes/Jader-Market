@@ -1,6 +1,16 @@
 // Fictional, fixed-price scenarios. Never use this module for actual trading.
 export const demoMarkets = [
   {
+    slug: "freshman-progression-2027",
+    question: "Will at least half of the freshman class progress to their second year in 2027?",
+    category: "community",
+    description: "A fictional freshman class faces its first-year assessments. YES requires at least 50% of the starting class to advance. The demo starts with a deliberately low 2% YES price; this is a sample scenario, not a forecast based on student data.",
+    rules: "The administrator fixes the cohort to students enrolled at the start of the 2026/27 academic year. Resolve YES if at least 50% of that cohort are officially approved to progress to their second year by 31 December 2027, 23:59 UTC. Otherwise resolve NO. Withdrawals and students repeating their first year remain in the denominator and do not count as advancing. Missing or unverifiable aggregate results make the market invalid.",
+    source: "The sole administrator's confirmation of the aggregate progression count.",
+    yesPrice: 2,
+    history: [18, 15, 13, 10, 8, 6, 5, 4, 3, 3, 2, 2],
+  },
+  {
     slug: "community-game-night",
     question: "Will at least 10 people join the next community game night?",
     category: "community",
