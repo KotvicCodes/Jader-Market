@@ -265,7 +265,7 @@ Apply one patch version bump per pull request that changes shipped code, relativ
 
 ## 10. First implementation tasks and decisions
 
-The next concrete work is **Milestone 4**: collateral-backed shares, reservations, and order matching. Foundation, account/credit controls, and market administration are implemented. The original foundation task list below is retained as historical scope; the confirmed first-version scope above overrides broader dispute/invitation features.
+The trading backend for **Milestone 4** is implemented in a dependency draft PR: collateral-backed shares, reservations, synchronous limit matching, expiry, private snapshots and a transactional outbox. See [Trading backend](TRADING_BACKEND.md) for APIs and verification. The next concrete work is **Milestone 5**: connect the trading interface, portfolio and live updates to those APIs. Sole-oracle resolution and credit payouts follow in Milestone 6. Foundation, account/credit controls, and market administration are implemented. The original foundation task list below is retained as historical scope; the confirmed first-version scope above overrides broader dispute/invitation features.
 
 First implementation pull request:
 
