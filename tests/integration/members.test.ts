@@ -118,6 +118,13 @@ describe("private accounts and administrator credits", () => {
     expect(await readSession(token)).toBeUndefined();
     expect(await readSession(randomToken())).toBeUndefined();
   });
+  it("revokes every session when a participant signs out everywhere", async () => {
+    const first = (await signIn(handle, "changed-synthetic-password", undefined)).token;
+    const second = (await signIn(handle, "changed-synthetic-password", undefined)).token;
+    await signOut(first, true);
+    expect(await readSession(first)).toBeUndefined();
+    expect(await readSession(second)).toBeUndefined();
+  });
   it("rate-limits attempts without retaining raw handles", async () => {
     await takeRateLimit("test_limit", handle, 1);
     await expect(takeRateLimit("test_limit", handle, 1)).rejects.toMatchObject({ code: "rate_limited" });

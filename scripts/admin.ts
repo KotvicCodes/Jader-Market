@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { getDatabase } from "../src/db/client";
 import { bootstrapAdministrator, recoverAdministrator } from "../src/db/members";
-import { MemberError } from "../src/domain/identity";
+import { encryptSecret, MemberError } from "../src/domain/identity";
 
 async function hiddenPassword(prompt: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new MemberError("terminal_required");
@@ -44,6 +44,7 @@ try {
     chmodSync(".env", 0o600);
     process.env.AUTH_SECRET = secret;
   }
+  encryptSecret("configuration check");
   const recover = process.argv.includes("--recover");
   const input = createInterface({ input: process.stdin, output: process.stdout });
   const handle = (await input.question("Administrator handle [admin]: ")).trim() || "admin";

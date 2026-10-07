@@ -67,7 +67,7 @@ async function newSession(tx: Transaction, userId: string) {
 export async function signIn(handleInput: unknown, password: unknown, mfaCode: unknown, previousToken?: string) {
   await takeRateLimit("signin_global", "all", 120, 60_000);
   let handle: string;
-  try { handle = normalizeHandle(handleInput); } catch { handle = "invalid"; }
+  try { handle = normalizeHandle(handleInput); } catch { handle = ""; }
   await takeRateLimit("signin", handle);
   const db = memberDatabase().db;
   await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
