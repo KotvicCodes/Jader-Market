@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase } from "../src/db/client";
-import { ledgerAccounts, sessions, users } from "../src/db/schema";
+import { ledgerAccounts, markets, sessions, users } from "../src/db/schema";
 import { digest, hashPassword, totp } from "../src/domain/identity";
 import { version } from "../package.json";
 
@@ -118,6 +118,61 @@ try {
   const freshCode = totp(mfaSecret, Math.floor(Date.now() / 30000) + 1);
   check((await request("/api/account/reauthenticate", adminCookies, { password, code: freshCode })).status === 200);
 
+  stage = "market draft authorization and privacy";
+  const draft = { question: `Will the synthetic HTTP launch ${suffix} happen?`, description: "A synthetic private market draft for HTTP verification.", category: "technology", resolutionRules: "Resolve YES only if the fictional launch is verified before closing. Otherwise resolve NO.", resolutionSource: "Synthetic launch record supplied by the operator.", closesAt: "2035-12-31T12:00:00Z", operationKey: randomUUID() };
+  check((await request("/api/admin/markets/create", new Map(), draft)).status === 401);
+  check((await request("/api/admin/markets/create", participantCookies, draft)).status === 403);
+  check((await request("/api/admin/markets/create", adminCookies, draft, { csrf: "invalid" })).status === 403);
+  check((await request("/api/admin/markets/create", adminCookies, draft, { origin: "https://example.invalid" })).status === 403);
+  const newDraft = await request("/api/admin/markets/create", adminCookies, draft);
+  check(newDraft.status === 201);
+  const { id: marketId } = await newDraft.json();
+  const slug = `market-${marketId}`;
+  check((await (await request("/api/admin/markets/create", adminCookies, draft)).json()).id === marketId);
+  check((await request(`/markets/${slug}`, new Map())).status === 404);
+  check(!(await (await request("/", new Map())).text()).includes(draft.question));
+  for (const jar of [new Map<string, string>(), participantCookies]) {
+    const privatePage = await request(`/admin/markets/${marketId}`, jar);
+    check(privatePage.headers.get("cache-control")?.includes("no-store"));
+    check(!(await privatePage.text()).includes(draft.question));
+  }
+  const adminDraftPage = await request(`/admin/markets/${marketId}`, adminCookies);
+  check(adminDraftPage.headers.get("cache-control")?.includes("no-store"));
+  const adminDraftHtml = await adminDraftPage.text();
+  check(adminDraftHtml.includes(draft.question) && adminDraftHtml.includes("Save draft") && adminDraftHtml.includes("Review publication"));
+  check(!adminDraftHtml.includes('endpoint="/api/admin/markets/publish"'));
+  const reviewHtml = await (await request(`/admin/markets/${marketId}?review=1`, adminCookies)).text();
+  check(reviewHtml.includes("Review saved terms") && reviewHtml.includes("Publish market") && reviewHtml.includes(draft.resolutionRules));
+  check(adminDraftHtml.includes('type="datetime-local"') && adminDraftHtml.includes('name="revision"'));
+  const adminList = await (await request("/admin/markets", adminCookies)).text();
+  check(adminList.includes("Create draft") && adminList.includes(draft.question));
+  check((await (await request("/admin/markets/new", adminCookies)).text()).includes("Create a YES/NO market"));
+  check((await request("/api/admin/markets/create", adminCookies, {}, { raw: JSON.stringify({ value: "x".repeat(17_000) }) })).status === 413);
+
+  stage = "market editing, publication, and immutable terms";
+  const edit = { ...draft, description: "Updated synthetic description for publication.", id: marketId, revision: "0", operationKey: randomUUID() };
+  check((await request("/api/admin/markets/edit", adminCookies, edit)).status === 200);
+  const publication = { id: marketId, revision: "1", operationKey: randomUUID(), confirmed: true };
+  check((await request("/api/admin/markets/publish", adminCookies, { ...publication, confirmed: false })).status === 400);
+  check((await request("/api/admin/markets/publish", adminCookies, { ...publication, revision: "0" })).status === 409);
+  check((await request("/api/admin/markets/publish", adminCookies, publication)).status === 200);
+  check((await request("/api/admin/markets/publish", adminCookies, publication)).status === 200);
+  check((await request("/api/admin/markets/edit", adminCookies, { ...edit, revision: "2", operationKey: randomUUID() })).status === 409);
+  const publicHtml = await (await request(`/markets/${slug}`, new Map())).text();
+  check(publicHtml.includes(draft.question) && publicHtml.includes(edit.description) && publicHtml.includes("These published terms are fixed"));
+  check(!publicHtml.includes("Administration history") && !publicHtml.includes("requestHash") && !publicHtml.includes("operationKey"));
+
+  stage = "market pause, resume, and permanent close";
+  const pause = { id: marketId, revision: "2", operationKey: randomUUID(), confirmed: true };
+  check((await request("/api/admin/markets/pause", adminCookies, pause)).status === 200);
+  check((await request("/api/admin/markets/pause", adminCookies, pause)).status === 200);
+  check((await (await request(`/markets/${slug}`, new Map())).text()).includes("The administrator has paused this market"));
+  check((await request("/api/admin/markets/resume", adminCookies, { ...pause, revision: "3", operationKey: randomUUID() })).status === 200);
+  check((await request("/api/admin/markets/close", adminCookies, { ...pause, revision: "4", operationKey: randomUUID() })).status === 200);
+  check((await request("/api/admin/markets/resume", adminCookies, { ...pause, revision: "5", operationKey: randomUUID() })).status === 409);
+  check((await (await request(`/markets/${slug}`, new Map())).text()).includes("This market is closed"));
+  check((await connection.db.select().from(markets).where(eq(markets.id, marketId)))[0].status === "closed");
+
   stage = "session revocation and password recovery";
   check((await request("/api/admin/suspend", adminCookies, { targetId: participantId, confirmed: true })).status === 200);
   check((await request("/api/account/reauthenticate", participantCookies, { password })).status === 401);
@@ -129,7 +184,7 @@ try {
   check((await request("/api/auth/sign-out", participantCookies, {})).status === 200);
   check((await request("/api/account/reauthenticate", participantCookies, { password: replacement })).status === 401);
   check((await request("/api/auth/sign-out", adminCookies, {})).status === 200);
-  console.info("HTTP account, credit, privacy, CSRF, and session workflows passed.");
+  console.info("HTTP account, credit, market lifecycle, privacy, CSRF, and session workflows passed.");
 } catch {
   console.error(`HTTP verification failed during ${stage}.`);
   process.exitCode = 1;

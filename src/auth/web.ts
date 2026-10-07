@@ -16,7 +16,7 @@ export function assertOrigin(request: Request) {
   if (request.headers.get("origin") !== appOrigin()) throw new MemberError("invalid_origin", 403);
 }
 
-export async function readBody(request: Request): Promise<Record<string, unknown>> {
+export async function readBody(request: Request, maximumBytes = 4096): Promise<Record<string, unknown>> {
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") throw new MemberError("invalid_request");
   const reader = request.body?.getReader();
   if (!reader) throw new MemberError("invalid_request");
@@ -26,7 +26,7 @@ export async function readBody(request: Request): Promise<Record<string, unknown
     const { value, done } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > 4096) { await reader.cancel(); throw new MemberError("invalid_request", 413); }
+    if (size > maximumBytes) { await reader.cancel(); throw new MemberError("invalid_request", 413); }
     chunks.push(value);
   }
   let body: unknown;
