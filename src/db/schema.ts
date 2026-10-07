@@ -16,11 +16,15 @@ export const markets = pgTable("markets", {
   publishedAt: timestamp("published_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   synthetic: text("synthetic").notNull().default("no"),
+  paused: boolean("paused").notNull().default(false),
+  revision: integer("revision").notNull().default(0),
 }, (table) => [
   index("market_public_index").on(table.status, table.closesAt),
   check("market_synthetic_valid", sql`${table.synthetic} IN ('yes', 'no')`),
   check("market_question_nonempty", sql`length(trim(${table.question})) BETWEEN 10 AND 240`),
   check("market_published_at_required", sql`${table.status} = 'draft' OR ${table.publishedAt} IS NOT NULL`),
+  check("market_pause_valid", sql`NOT ${table.paused} OR ${table.status} = 'open'`),
+  check("market_revision_valid", sql`${table.revision} >= 0`),
 ]);
 
 export const users = pgTable("users", {
@@ -102,3 +106,17 @@ export const adminAudit = pgTable("admin_audit", {
   action: text("action").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const marketAudit = pgTable("market_audit", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  marketId: uuid("market_id").notNull().references(() => markets.id),
+  actorId: uuid("actor_id").notNull().references(() => users.id),
+  operationKey: uuid("operation_key").notNull().unique(),
+  requestHash: text("request_hash").notNull(),
+  action: text("action").notNull(),
+  revision: integer("revision").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("market_audit_history_index").on(table.marketId, table.createdAt),
+  check("market_audit_action_valid", sql`${table.action} IN ('create', 'edit', 'publish', 'pause', 'resume', 'close')`),
+]);

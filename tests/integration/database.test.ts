@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { eq } from "drizzle-orm";
@@ -12,14 +13,25 @@ const url = process.env.TEST_DATABASE_URL;
 let safeTestDatabase = false;
 try { safeTestDatabase = Boolean(url && new URL(url).pathname.endsWith("_test")); } catch {}
 if (!url || !safeTestDatabase) throw new Error("A dedicated test database is required.");
-const connection = createDatabase(url);
-process.env.DATABASE_URL = url;
+const control = createDatabase(url);
+const name = `jader_browse_${randomUUID().replaceAll("-", "").slice(0, 16)}_test`;
+const isolatedUrl = new URL(url);
+isolatedUrl.pathname = `/${name}`;
+const connection = createDatabase(isolatedUrl.toString());
+process.env.DATABASE_URL = isolatedUrl.toString();
+let created = false;
 
 beforeAll(async () => {
+  await control.client.unsafe(`CREATE DATABASE "${name}"`);
+  created = true;
   await migrate(connection.db, { migrationsFolder: "drizzle" });
-  await connection.db.delete(markets);
 });
-afterAll(async () => { await connection.client.end(); await getDatabase()?.client.end(); });
+afterAll(async () => {
+  await connection.client.end();
+  await getDatabase()?.client.end();
+  if (created) await control.client.unsafe(`DROP DATABASE "${name}"`);
+  await control.client.end();
+});
 
 describe("market storage", () => {
   it("seeds idempotently and does not expose a draft through a public selection", async () => {
