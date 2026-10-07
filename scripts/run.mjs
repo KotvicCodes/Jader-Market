@@ -7,7 +7,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const temporaryDirectory = join(root, ".cache", "tmp");
 mkdirSync(temporaryDirectory, { recursive: true });
 const [command, ...args] = process.argv.slice(2);
-const child = spawn(command, args, {
+const child = spawn(command === "node" ? process.execPath : command, args, {
   cwd: root,
   stdio: "inherit",
   env: { ...process.env, TMPDIR: temporaryDirectory, NEXT_TELEMETRY_DISABLED: "1" },
