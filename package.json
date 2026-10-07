@@ -18,6 +18,8 @@
     "db:generate": "node scripts/run.mjs drizzle-kit generate",
     "db:migrate": "node scripts/run.mjs tsx scripts/migrate.ts",
     "db:seed": "node scripts/run.mjs tsx scripts/seed.ts",
+    "admin:create": "node scripts/run.mjs tsx scripts/admin.ts",
+    "admin:recover": "node scripts/run.mjs tsx scripts/admin.ts --recover",
     "worker": "node scripts/run.mjs tsx scripts/worker.ts",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build"
   },
