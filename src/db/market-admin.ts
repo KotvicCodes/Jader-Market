@@ -1,3 +1,4 @@
+import { cancelTradingOrders } from "./trading";
 import { and, count, desc, eq, ilike, sql } from "drizzle-orm";
 import { digest, MemberError } from "../domain/identity";
 import { marketRevision, marketUuid, parseMarketTerms, type MarketAction } from "../domain/market-admin";
@@ -49,6 +50,7 @@ export async function mutateMarket(token: string, action: MarketAction, input: R
           changes = { paused: action === "pause" };
         }
       }
+      if (action === "close") await cancelTradingOrders(tx, { marketId: id }, "market_closed");
       await tx.update(markets).set({ ...changes, revision: nextRevision }).where(eq(markets.id, id));
     }
     await tx.insert(marketAudit).values({ marketId: id, actorId: actor.user.id, operationKey, requestHash, action, revision: nextRevision });
