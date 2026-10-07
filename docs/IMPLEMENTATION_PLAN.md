@@ -6,6 +6,14 @@ The operator confirmed that this is a small closed community, the operator is th
 
 The first version targets administrator-created accounts, binary markets, internal balances, complete-set minting, a simple order book, participant portfolios, direct administrator resolution, and confirmed offline balance adjustments. There is no challenge window, second resolver, public registration, automated liquidity, community discussion, or multi-outcome trading in this version. The broader features below remain optional future work.
 
+## Current implementation
+
+The foundation and accounts/credits milestone are implemented: administrator-created handles, password sign-in, opaque revocable sessions, administrator authenticator enrollment and recent authentication, private persistent balances and paginated history, account suspension/password recovery, and confirmed offline credit/debit adjustments. Only an authenticated administrator can issue new participant credits. Winning bets will redistribute existing collateral when trading and resolution are implemented.
+
+The implementation uses Node's built-in salted scrypt instead of the initially proposed Argon2 dependency, with N=32768, r=8, p=3. Administrator MFA secrets are encrypted with a local private key. Participant recovery is administrator-assisted; sole-administrator recovery requires the trusted local CLI. There is no public registration or default password. The ledger uses integer ticks, balanced append-only journals, database-enforced balance projections, and idempotent operations. Practice trading remains separate from persistent participant credits.
+
+Next: administrator market lifecycle controls, followed by collateral-backed trading/reservations and direct administrator resolution. Pending offline requests, backups, and deployment are later milestones. Code changes now ship on feature branches through pull requests; the accounts/credits PR uses a single patch version increment.
+
 ## 1. Goal and prototype boundary
 
 Build a practical prediction market application called **Jader-Market**, inspired by Polymarket's market browsing, outcome trading, order books, and portfolio experience. Implement original branding and interfaces.

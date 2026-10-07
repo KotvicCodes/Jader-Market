@@ -15,6 +15,7 @@
     "lint": "node scripts/run.mjs eslint . --max-warnings=0",
     "test": "node scripts/run.mjs vitest run",
     "test:integration": "node scripts/run.mjs vitest run --config vitest.integration.config.ts",
+    "test:http": "node scripts/run.mjs tsx scripts/test-members-http.ts",
     "db:generate": "node scripts/run.mjs drizzle-kit generate",
     "db:migrate": "node scripts/run.mjs tsx scripts/migrate.ts",
     "db:seed": "node scripts/run.mjs tsx scripts/seed.ts",
