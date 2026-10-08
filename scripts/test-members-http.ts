@@ -16,7 +16,12 @@ if (!url || !new URL(url).pathname.endsWith("_test")) {
   console.error("HTTP checks require a dedicated test database.");
   process.exit(1);
 }
-const connection = createDatabase(url);
+const control = createDatabase(url);
+const databaseName = `jader_http_${randomUUID().replaceAll("-", "").slice(0, 16)}_test`;
+const isolatedUrl = new URL(url);
+isolatedUrl.pathname = `/${databaseName}`;
+const connection = createDatabase(isolatedUrl.toString());
+let databaseCreated = false;
 const origin = "http://127.0.0.1:3107";
 const secret = randomBytes(32).toString("hex");
 const password = randomBytes(24).toString("base64url");
@@ -47,6 +52,8 @@ async function request(path: string, jar: Map<string, string>, body?: Record<str
 }
 
 try {
+  await control.client.unsafe(`CREATE DATABASE "${databaseName}"`);
+  databaseCreated = true;
   await migrate(connection.db, { migrationsFolder: "drizzle" });
   const [admin] = await connection.db.insert(users).values({ handle: adminHandle, role: "admin", passwordHash: await hashPassword(password) }).returning();
   await connection.db.insert(ledgerAccounts).values([{ kind: "wallet", ownerId: admin.id }, { kind: "reserved", ownerId: admin.id }]);
@@ -55,7 +62,7 @@ try {
   mkdirSync(temporaryDirectory, { recursive: true });
   child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3107"], {
     cwd: process.cwd(), stdio: "ignore",
-    env: { ...process.env, DATABASE_URL: url, AUTH_SECRET: secret, APP_ORIGIN: origin, AUTH_TRUSTED_IP_HEADER: "x-test-client-ip", NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
+    env: { ...process.env, DATABASE_URL: isolatedUrl.toString(), AUTH_SECRET: secret, APP_ORIGIN: origin, AUTH_TRUSTED_IP_HEADER: "x-test-client-ip", NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
   });
   let ready = false;
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -204,5 +211,16 @@ try {
     await Promise.race([new Promise<void>(resolveExit => child!.once("exit", () => resolveExit())), delay(3000)]);
     if (child.exitCode === null) child.kill("SIGKILL");
   }
-  await connection.client.end();
+  try {
+    await connection.client.end();
+  } finally {
+    try {
+      if (databaseCreated) await control.client.unsafe(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    } catch {
+      console.error("HTTP verification cleanup failed.");
+      process.exitCode = 1;
+    } finally {
+      await control.client.end();
+    }
+  }
 }

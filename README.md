@@ -85,7 +85,7 @@ npm run build
 npm run test:http
 ```
 
-Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, and market lifecycle tests create and drop disposable databases, so the test role needs CREATEDB permission. Other suites and HTTP checks retain synthetic fixtures in the dedicated test database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
+Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, market lifecycle and HTTP checks create and drop disposable databases, so the test role needs CREATEDB permission. Other integration suites retain synthetic fixtures in the dedicated test database. HTTP migrations and synthetic account records never modify the configured control database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
 For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Community trading remains disabled.
 
