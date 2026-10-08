@@ -4,7 +4,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { getDatabase } from "../src/db/client";
 import { bootstrapAdministrator, recoverAdministrator } from "../src/db/members";
-import { encryptSecret, MemberError } from "../src/domain/identity";
+import { encryptSecret, MemberError, normalizeHandle, validatePassword } from "../src/domain/identity";
 
 async function hiddenPassword(prompt: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new MemberError("terminal_required");
@@ -35,6 +35,16 @@ async function hiddenPassword(prompt: string) {
 
 try {
   if (!process.stdin.isTTY || !getDatabase()) throw new MemberError("configuration");
+  const recover = process.argv.includes("--recover");
+  const input = createInterface({ input: process.stdin, output: process.stdout });
+  const handle = (await input.question("Administrator handle [admin]: ")).trim() || "admin";
+  input.close();
+  const password = await hiddenPassword("Password (12 to 128 characters, hidden): ");
+  const confirmation = await hiddenPassword("Repeat password (hidden): ");
+  if (password !== confirmation) throw new MemberError("password_mismatch");
+  normalizeHandle(handle);
+  validatePassword(password);
+  await getDatabase()!.client`select 1`;
   // Generate the local encryption key once. It is never printed or stored in git.
   if (!process.env.AUTH_SECRET) {
     const secret = randomBytes(32).toString("hex");
@@ -45,13 +55,6 @@ try {
     process.env.AUTH_SECRET = secret;
   }
   encryptSecret("configuration check");
-  const recover = process.argv.includes("--recover");
-  const input = createInterface({ input: process.stdin, output: process.stdout });
-  const handle = (await input.question("Administrator handle [admin]: ")).trim() || "admin";
-  input.close();
-  const password = await hiddenPassword("Password (12 to 128 characters, hidden): ");
-  const confirmation = await hiddenPassword("Repeat password (hidden): ");
-  if (password !== confirmation) throw new MemberError("password_mismatch");
   if (recover) await recoverAdministrator(handle, password);
   else await bootstrapAdministrator(handle, password);
   console.info(recover ? "Administrator recovered. Existing sessions were revoked." : "Administrator created with zero credits.");

@@ -14,7 +14,7 @@ npm run admin:create
 npm run dev
 ```
 
-`admin:create` runs in an interactive terminal. Choose a handle and a password of 12 to 128 characters; passwords are hidden and never passed as command arguments. It creates the sole administrator with zero credits and generates a private `AUTH_SECRET` in `.env` if needed. There are no default sign-in credentials. Restart the app after initial setup so it loads the generated key.
+`admin:create` runs in an interactive terminal. Choose a handle and a password of 12 to 128 characters; passwords are hidden and never passed as command arguments. It validates the handle and matching passwords and checks database readiness before generating a private `AUTH_SECRET` in `.env` if needed, then creates the sole administrator with zero credits. There are no default sign-in credentials. Restart the app after initial setup so it loads the generated key.
 
 1. Open `/account`, sign in, and enable your authenticator using the private setup key and a six-digit code. The authenticator uses standard time-based codes (SHA-1, six digits, 30 seconds).
 2. Open `/admin` and create a participant. New accounts always start with zero credits. Give the initial password to that participant privately; they can change it on `/account`.
