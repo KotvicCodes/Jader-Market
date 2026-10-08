@@ -64,11 +64,11 @@ async function newSession(tx: Transaction, userId: string) {
   return { token, csrf };
 }
 
-export async function signIn(handleInput: unknown, password: unknown, mfaCode: unknown, previousToken?: string) {
-  await takeRateLimit("signin_global", "all", 120, 60_000);
+export async function signIn(handleInput: unknown, password: unknown, mfaCode: unknown, previousToken?: string, client = "local-development") {
+  await takeRateLimit("signin_client", client, 30);
   let handle: string;
   try { handle = normalizeHandle(handleInput); } catch { handle = ""; }
-  await takeRateLimit("signin", handle);
+  await takeRateLimit("signin", JSON.stringify([client, handle]));
   const db = memberDatabase().db;
   await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
   await db.delete(rateLimits).where(lt(rateLimits.windowStart, new Date(Date.now() - 24 * 60 * 60 * 1000)));

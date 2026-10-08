@@ -27,6 +27,10 @@ Administrator controls require MFA and authentication within the last 10 minutes
 
 Keep `.env` and its generated `AUTH_SECRET` private and back it up with the private database. Losing or changing the key invalidates existing authenticator secrets. Set `APP_ORIGIN` to the exact browser origin; HTTPS is required beyond loopback, and session cookies are Secure on HTTPS. The local prototype defaults to `http://localhost:3000`.
 
+Production sign-in requires `AUTH_TRUSTED_IP_HEADER`, for example `x-real-ip`, supplied by your trusted reverse proxy. The proxy must overwrite any inbound value with the actual client address, and the app port must accept connections only from that proxy. A single IPv4 or IPv6 address is required; forwarded lists, ports and missing values are rejected. Arbitrary `X-Forwarded-For` headers are ignored unless that specific header is configured and contains one address. Production sign-in returns a safe configuration error until this is configured. `npm run dev` uses one local-development identity for local testing; keep that mode on the trusted development host.
+
+Login limits apply to a client address (30 attempts per 15 minutes) and that address plus the normalized handle (10 attempts per 15 minutes). There is no shared global or handle-only login bucket that one client can exhaust to lock out another address. Only keyed HMAC identifiers are stored in the private rate-limit table, with records older than 24 hours pruned during sign-in; addresses and handles are never written to logs or returned in errors. IPv6 aliases and IPv4-mapped addresses share a canonical bucket. Users sharing the same public address share its login budget. Distributed attacks need protections at the trusted proxy.
+
 Passwords use Node's salted scrypt (N=32768, r=8, p=3). Sessions use random opaque tokens stored as hashes, HttpOnly/SameSite cookies, explicit origin and CSRF checks, and database-backed rate limits with hashed keys. Ledger amounts use 10,000 integer ticks per credit. Database triggers enforce balanced, append-only adjustment journals and matching balance projections. Private account/admin responses disable caching; request values and database errors are never logged by the application.
 
 ## Create and manage a market
@@ -83,7 +87,7 @@ npm run test:http
 
 Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, and market lifecycle tests create and drop disposable databases, so the test role needs CREATEDB permission. Other suites and HTTP checks retain synthetic fixtures in the dedicated test database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
-For a production build, run `npm run build` and `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Community trading remains disabled.
+For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Community trading remains disabled.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
 

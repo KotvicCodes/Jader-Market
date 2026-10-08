@@ -30,8 +30,8 @@ const participantCookies = new Map<string, string>();
 
 function check(condition: unknown) { if (!condition) throw new Error("HTTP assertion failed"); }
 
-async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string } = {}) {
-  const headers: Record<string, string> = { Cookie: Array.from(jar, ([key, value]) => `${key}=${value}`).join("; ") };
+async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string; client?: string } = {}) {
+  const headers: Record<string, string> = { "X-Test-Client-IP": options.client ?? "192.0.2.1", Cookie: Array.from(jar, ([key, value]) => `${key}=${value}`).join("; ") };
   if (body || options.raw) {
     headers["Content-Type"] = "application/json";
     headers.Origin = options.origin ?? origin;
@@ -55,7 +55,7 @@ try {
   mkdirSync(temporaryDirectory, { recursive: true });
   child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3107"], {
     cwd: process.cwd(), stdio: "ignore",
-    env: { ...process.env, DATABASE_URL: url, AUTH_SECRET: secret, APP_ORIGIN: origin, NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
+    env: { ...process.env, DATABASE_URL: url, AUTH_SECRET: secret, APP_ORIGIN: origin, AUTH_TRUSTED_IP_HEADER: "x-test-client-ip", NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
   });
   let ready = false;
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -172,6 +172,16 @@ try {
   check((await request("/api/admin/markets/resume", adminCookies, { ...pause, revision: "5", operationKey: randomUUID() })).status === 409);
   check((await (await request(`/markets/${slug}`, new Map())).text()).includes("This market is closed"));
   check((await connection.db.select().from(markets).where(eq(markets.id, marketId)))[0].status === "closed");
+
+  stage = "client-scoped login isolation";
+  for (let i = 0; i < 11; i++) {
+    const attempt = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password: "incorrect-password" }, { client: "198.51.100.2" });
+    check(attempt.status === (i < 10 ? 401 : 429));
+  }
+  const isolatedLogin = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password }, { client: "198.51.100.3" });
+  check(isolatedLogin.status === 200);
+  const invalidClient = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password }, { client: "198.51.100.3, 198.51.100.4" });
+  check(invalidClient.status === 503 && (await invalidClient.json()).error === "configuration");
 
   stage = "session revocation and password recovery";
   check((await request("/api/admin/suspend", adminCookies, { targetId: participantId, confirmed: true })).status === 200);
