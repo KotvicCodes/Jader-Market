@@ -1,3 +1,34 @@
-export default function AdminPage() {
-  return <><p className="eyebrow">Operator workspace</p><h1>Administration</h1><div className="empty"><h2>Administrator access is not enabled yet</h2><p>Market creation, balances, and oracle resolution will require an authenticated administrator. This page contains no private records or live controls.</p></div></>;
+import Link from "next/link";
+import { randomUUID } from "node:crypto";
+import { currentMember } from "../../auth/web";
+import { administratorSnapshot } from "../../db/members";
+import { formatCredits, MemberError } from "../../domain/identity";
+import { parseMarketQuery } from "../../domain/market-query";
+import { MemberForm } from "../../components/member-form";
+
+export const dynamic = "force-dynamic";
+
+export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const query = typeof params.q === "string" ? params.q.trim().slice(0, 32) : "";
+  const page = parseMarketQuery({ page: typeof params.page === "string" ? params.page : undefined }).page;
+  let snapshot;
+  let member;
+  try {
+    member = await currentMember();
+    if (member?.user.role === "admin") snapshot = await administratorSnapshot(member.token, page, query);
+  } catch (error) {
+    if (member && error instanceof MemberError && error.code === "reauth_required") return <><h1>Confirm administrator access</h1><section className="panel account-signin"><MemberForm endpoint="/api/account/reauthenticate" csrf={member.csrf} submitLabel="Confirm access" successText="Administrator access refreshed."><label>Password<input name="password" type="password" autoComplete="current-password" required maxLength={128} /></label><label>Fresh authenticator code<input name="code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" maxLength={6} required /></label></MemberForm></section></>;
+    return <div className="empty"><h1>{error instanceof MemberError && error.code === "mfa_required" ? "Set up your authenticator" : "Administration temporarily unavailable"}</h1><p>Check your account setup or try again later.</p><Link className="button" href="/account">Open account</Link></div>;
+  }
+  if (!snapshot || !member) return <div className="empty"><h1>Administrator access required</h1><p>Account creation and credit issuance are restricted to the community administrator.</p><Link className="button" href="/account">Open account</Link></div>;
+  const csrf = member.csrf;
+  const pageLink = (value: number) => `/admin?${new URLSearchParams({ q: query, page: String(value) })}`;
+  return <>
+    <div className="page-heading"><div><p className="eyebrow">Operator workspace</p><h1>Accounts and credits</h1><p className="muted">Create participant accounts and record confirmed credit adjustments.</p></div><Link href="/account" className="badge">Administrator authenticated</Link></div>
+    <form className="filters" action="/admin"><label>Find an account<input name="q" placeholder="Search handles" defaultValue={query} maxLength={32} autoComplete="off" /></label><button type="submit">Search</button></form>
+    <div className="detail-grid"><section className="panel"><h2>Participant accounts</h2>{snapshot.accounts.length ? <div className="table-wrap"><table><thead><tr><th>Handle</th><th>Status</th><th>Available credits</th><th>Controls</th></tr></thead><tbody>{snapshot.accounts.map(account => <tr key={account.id}><td>{account.handle}</td><td>{account.role === "admin" ? "Administrator" : account.suspended ? "Suspended" : "Active"}</td><td>{formatCredits(account.balance)}</td><td>{account.role === "participant" ? <details className="account-controls"><summary>Manage account</summary><MemberForm endpoint={`/api/admin/${account.suspended ? "resume" : "suspend"}`} csrf={csrf} submitLabel={account.suspended ? "Resume account" : "Suspend account"} successText="Account access updated."><input type="hidden" name="targetId" value={account.id} /><label className="checkbox-label"><input type="checkbox" name="confirmed" required />Confirm account access change</label></MemberForm><MemberForm endpoint="/api/admin/reset-password" csrf={csrf} submitLabel="Reset password" successText="Password reset and sessions revoked."><input type="hidden" name="targetId" value={account.id} /><label>New password<input name="password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label><label className="checkbox-label"><input type="checkbox" name="confirmed" required />Confirm password reset</label></MemberForm></details> : <span className="muted">Owner account</span>}</td></tr>)}</tbody></table></div> : <p className="muted">No matching accounts. Try another search.</p>}<div className="pagination"><span>{snapshot.total} accounts · Page {page}</span>{page > 1 && <Link href={pageLink(page - 1)}>Previous</Link>}{page * 20 < snapshot.total && <Link href={pageLink(page + 1)}>Next</Link>}</div></section>
+    <aside className="stack"><section className="panel"><h2>Create participant</h2><p className="muted">New accounts start with zero credits. Share the initial password privately; the participant can change it after signing in.</p><MemberForm endpoint="/api/admin/create-account" csrf={csrf} submitLabel="Create account" successText="Participant created with zero credits."><label>Handle<input name="handle" autoComplete="off" autoCapitalize="none" spellCheck={false} minLength={3} maxLength={32} pattern="[A-Za-z][A-Za-z0-9_-]{2,31}" required /></label><label>Initial password<input name="password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label></MemberForm></section>
+    <section className="panel"><h2>Credit adjustment</h2><p className="muted">Only confirm offline credits after receiving the transfer, and offline debits after settling it. Corrections create a new record; they do not edit history.</p><MemberForm endpoint="/api/admin/credits" csrf={csrf} operationKey={randomUUID()} submitLabel="Confirm adjustment" successText="Credit adjustment recorded. The participant's balance is updated."><label>Account on this page<select name="recipientId" required defaultValue=""><option value="" disabled>Choose an account</option>{snapshot.accounts.filter(account => !account.suspended).map(account => <option key={account.id} value={account.id}>{account.handle}</option>)}</select></label><label>Action<select name="kind"><option value="credit">Issue credits</option><option value="debit">Remove credits</option></select></label><label>Amount in credits<input name="amount" type="number" min="0.0001" max="1000000" step="0.0001" required /></label><label>Reason<select name="reason"><option value="demo_grant">Demo credit grant (issue only)</option><option value="offline_credit">Confirmed offline receipt (issue only)</option><option value="offline_debit">Confirmed offline payout (remove only)</option><option value="correction">Balance correction</option></select></label><label className="checkbox-label"><input type="checkbox" name="confirmed" required />I checked the account and amount and confirmed any offline transfer.</label></MemberForm><p className="muted demo-hint">Search or change pages above to select another account.</p></section></aside></div>
+  </>;
 }
