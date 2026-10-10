@@ -21,10 +21,19 @@ const errors: Record<string, string> = {
   invalid_csrf: "Refresh the page and try again.",
   invalid_origin: "The operator needs to match APP_ORIGIN to this site's address.",
   configuration: "The account service needs operator setup. Check database migrations and administrator initialization.",
+  invalid_market_terms: "Use a question of 10 to 240 characters, a description of 10 to 600, rules of 20 to 1,200, and a source of 5 to 400. Choose a listed category.",
+  invalid_market_deadline: "Enter a valid UTC closing time. Publication requires a future deadline.",
+  market_stale: "This market changed since you opened it. Reload the page, review the saved terms, and try again.",
+  market_terms_locked: "Published terms are locked. Create a new draft for a different question or deadline.",
+  market_transition: "This action is unavailable in the market's current state. Reload the page.",
+  market_expired: "The closing time has passed. This market cannot be paused or resumed.",
+  market_missing: "This market is unavailable. Return to the market list.",
+  market_operation_conflict: "This request reference was already used for different changes. Reload and check the saved market before submitting again.",
 };
 
-export function MemberForm({ endpoint, csrf = "", children, submitLabel, successText = "Saved.", destination, operationKey, refresh = true, onSuccess }: {
+export function MemberForm({ endpoint, csrf = "", children, submitLabel, successText = "Saved.", destination, operationKey, refresh = true, onSuccess, resetOnSuccess = true, newOperationLabel = "Start a new adjustment", transformValues }: {
   endpoint: string; csrf?: string; children?: ReactNode; submitLabel: string; successText?: string; destination?: string; operationKey?: string; refresh?: boolean; onSuccess?: (data: Record<string, unknown>) => void;
+  resetOnSuccess?: boolean; newOperationLabel?: string | false; transformValues?: (values: Record<string, unknown>) => Record<string, unknown>;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -41,25 +50,25 @@ export function MemberForm({ endpoint, csrf = "", children, submitLabel, success
     setPending(true);
     setMessage(undefined);
     try {
-      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, credentials: "same-origin", cache: "no-store", body: JSON.stringify(values) });
+      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, credentials: "same-origin", cache: "no-store", body: JSON.stringify(transformValues ? transformValues(values) : values) });
       const data: Record<string, unknown> = await response.json();
       if (!response.ok) {
-        setMessage({ text: typeof data.error === "string" && errors[data.error] ? errors[data.error] : "The request could not be completed. Check the current balance and try again.", error: true });
+        setMessage({ text: typeof data.error === "string" && errors[data.error] ? errors[data.error] : "The request could not be completed. Check the current page and try again.", error: true });
         return;
       }
-      form.reset();
+      if (resetOnSuccess) form.reset();
       if (key) setKey(crypto.randomUUID());
       setMessage({ text: successText, error: false });
       onSuccess?.(data);
       if (destination) router.replace(destination);
       if (refresh) router.refresh();
     } catch {
-      setMessage({ text: "The service is unavailable. Check your balance before retrying the same adjustment.", error: true });
+      setMessage({ text: "The service is unavailable. Check the saved result before retrying the same request.", error: true });
     } finally { setPending(false); }
   }
 
   return <form className="member-form" onSubmit={submit}>
-    <fieldset disabled={pending}>{children}<button type="submit">{pending ? "Saving…" : submitLabel}</button>{operationKey && <button type="reset" className="secondary-button" onClick={() => setKey(crypto.randomUUID())}>Start a new adjustment</button>}</fieldset>
+    <fieldset disabled={pending}>{children}<button type="submit">{pending ? "Saving…" : submitLabel}</button>{operationKey && newOperationLabel && <button type="reset" className="secondary-button" onClick={() => setKey(crypto.randomUUID())}>{newOperationLabel}</button>}</fieldset>
     {message && <p role={message.error ? "alert" : "status"} className={message.error ? "error" : "success"}>{message.text}</p>}
   </form>;
 }

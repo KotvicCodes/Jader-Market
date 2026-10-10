@@ -8,11 +8,13 @@ The first version targets administrator-created accounts, binary markets, intern
 
 ## Current implementation
 
-The foundation and accounts/credits milestone are implemented: administrator-created handles, password sign-in, opaque revocable sessions, administrator authenticator enrollment and recent authentication, private persistent balances and paginated history, account suspension/password recovery, and confirmed offline credit/debit adjustments. Only an authenticated administrator can issue new participant credits. Winning bets will redistribute existing collateral when trading and resolution are implemented.
+The foundation and accounts/credits milestone are implemented: administrator-created handles, password sign-in, opaque revocable sessions, administrator authenticator enrollment and recent authentication, private persistent balances and paginated history, account suspension/password recovery, and confirmed offline credit/debit adjustments. Only an authenticated administrator can issue new participant credits. Winning bets will redistribute existing collateral when resolution is implemented.
 
 The implementation uses Node's built-in salted scrypt instead of the initially proposed Argon2 dependency, with N=32768, r=8, p=3. Administrator MFA secrets are encrypted with a local private key. Participant recovery is administrator-assisted; sole-administrator recovery requires the trusted local CLI. There is no public registration or default password. The ledger uses integer ticks, balanced append-only journals, database-enforced balance projections, and idempotent operations. Practice trading remains separate from persistent participant credits.
 
-Next: administrator market lifecycle controls, followed by collateral-backed trading/reservations and direct administrator resolution. Pending offline requests, backups, and deployment are later milestones. Code changes now ship on feature branches through pull requests; the accounts/credits PR uses a single patch version increment.
+Market administration is implemented: private editable YES/NO drafts, explicit UTC deadlines, saved-term publication review, immutable published terms, pause/resume/permanent close controls, paginated admin lists/history, stale-edit protection, and idempotent mutations. Services reauthorize inside transactions; PostgreSQL guards published terms and append-only audit entries. Public pages derive deadline closure on each request without depending on a worker. Paused or expired markets cannot resume after their deadline. Trading transactions use the same eligibility check and compatible market locks. Database status transitions currently permit only draft-to-open and open-to-closed; the resolution milestone will add its transitions through a new migration.
+
+The collateral-backed trading backend is implemented: complete-set mint/burn, reservations, limit matching, expiry maintenance, private snapshots, and a transactional outbox (see [Trading backend](TRADING_BACKEND.md)). Next is Milestone 5: participant trading interface, positions, and live updates, followed by direct administrator resolution and payouts in Milestone 6. Pending offline requests, backups, and deployment are later milestones. Code changes ship on feature branches through pull requests, each with a single patch version increment. The market administration PR depends on the accounts/credits PR.
 
 ## 1. Goal and prototype boundary
 
@@ -263,7 +265,7 @@ Apply one patch version bump per pull request that changes shipped code, relativ
 
 ## 10. First implementation tasks and decisions
 
-The next concrete work is **Milestone 1**, followed by **Milestone 2**. Do not start with a polished trading mockup that has no ledger behind it.
+The trading backend for **Milestone 4** is implemented in a dependency PR: collateral-backed shares, reservations, synchronous limit matching, expiry, private snapshots and a transactional outbox. See [Trading backend](TRADING_BACKEND.md) for APIs and verification. The next concrete work is **Milestone 5**: connect the trading interface, portfolio and live updates to those APIs. Sole-oracle resolution and credit payouts follow in Milestone 6. Foundation, account/credit controls, and market administration are implemented. The original foundation task list below is retained as historical scope; the confirmed first-version scope above overrides broader dispute/invitation features.
 
 First implementation pull request:
 

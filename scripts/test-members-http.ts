@@ -7,7 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase } from "../src/db/client";
-import { ledgerAccounts, sessions, users } from "../src/db/schema";
+import { ledgerAccounts, markets, sessions, users } from "../src/db/schema";
 import { digest, hashPassword, totp } from "../src/domain/identity";
 import { version } from "../package.json";
 
@@ -125,6 +125,101 @@ try {
   const freshCode = totp(mfaSecret, Math.floor(Date.now() / 30000) + 1);
   check((await request("/api/account/reauthenticate", adminCookies, { password, code: freshCode })).status === 200);
 
+  stage = "market draft authorization and privacy";
+  const draft = { question: `Will the synthetic HTTP launch ${suffix} happen?`, description: "A synthetic private market draft for HTTP verification.", category: "technology", resolutionRules: "Resolve YES only if the fictional launch is verified before closing. Otherwise resolve NO.", resolutionSource: "Synthetic launch record supplied by the operator.", closesAt: "2035-12-31T12:00:00Z", operationKey: randomUUID() };
+  check((await request("/api/admin/markets/create", new Map(), draft)).status === 401);
+  check((await request("/api/admin/markets/create", participantCookies, draft)).status === 403);
+  check((await request("/api/admin/markets/create", adminCookies, draft, { csrf: "invalid" })).status === 403);
+  check((await request("/api/admin/markets/create", adminCookies, draft, { origin: "https://example.invalid" })).status === 403);
+  const newDraft = await request("/api/admin/markets/create", adminCookies, draft);
+  check(newDraft.status === 201);
+  const { id: marketId } = await newDraft.json();
+  const slug = `market-${marketId}`;
+  check((await (await request("/api/admin/markets/create", adminCookies, draft)).json()).id === marketId);
+  check((await request(`/markets/${slug}`, new Map())).status === 404);
+  check((await request(`/api/markets/${marketId}/book`, new Map())).status === 404);
+  check((await request(`/api/markets/${marketId}/portfolio`, participantCookies)).status === 404);
+  check(!(await (await request("/", new Map())).text()).includes(draft.question));
+  for (const jar of [new Map<string, string>(), participantCookies]) {
+    const privatePage = await request(`/admin/markets/${marketId}`, jar);
+    check(privatePage.headers.get("cache-control")?.includes("no-store"));
+    check(!(await privatePage.text()).includes(draft.question));
+  }
+  const adminDraftPage = await request(`/admin/markets/${marketId}`, adminCookies);
+  check(adminDraftPage.headers.get("cache-control")?.includes("no-store"));
+  const adminDraftHtml = await adminDraftPage.text();
+  check(adminDraftHtml.includes(draft.question) && adminDraftHtml.includes("Save draft") && adminDraftHtml.includes("Review publication"));
+  check(!adminDraftHtml.includes('endpoint="/api/admin/markets/publish"'));
+  const reviewHtml = await (await request(`/admin/markets/${marketId}?review=1`, adminCookies)).text();
+  check(reviewHtml.includes("Review saved terms") && reviewHtml.includes("Publish market") && reviewHtml.includes(draft.resolutionRules));
+  check(adminDraftHtml.includes('type="datetime-local"') && adminDraftHtml.includes('name="revision"'));
+  const adminList = await (await request("/admin/markets", adminCookies)).text();
+  check(adminList.includes("Create draft") && adminList.includes(draft.question));
+  check((await (await request("/admin/markets/new", adminCookies)).text()).includes("Create a YES/NO market"));
+  check((await request("/api/admin/markets/create", adminCookies, {}, { raw: JSON.stringify({ value: "x".repeat(17_000) }) })).status === 413);
+
+  stage = "market editing, publication, and immutable terms";
+  const edit = { ...draft, description: "Updated synthetic description for publication.", id: marketId, revision: "0", operationKey: randomUUID() };
+  check((await request("/api/admin/markets/edit", adminCookies, edit)).status === 200);
+  const publication = { id: marketId, revision: "1", operationKey: randomUUID(), confirmed: true };
+  check((await request("/api/admin/markets/publish", adminCookies, { ...publication, confirmed: false })).status === 400);
+  check((await request("/api/admin/markets/publish", adminCookies, { ...publication, revision: "0" })).status === 409);
+  check((await request("/api/admin/markets/publish", adminCookies, publication)).status === 200);
+  check((await request("/api/admin/markets/publish", adminCookies, publication)).status === 200);
+  check((await request("/api/admin/markets/edit", adminCookies, { ...edit, revision: "2", operationKey: randomUUID() })).status === 409);
+  const publicHtml = await (await request(`/markets/${slug}`, new Map())).text();
+  check(publicHtml.includes(draft.question) && publicHtml.includes(edit.description) && publicHtml.includes("These published terms are fixed"));
+  check(!publicHtml.includes("Administration history") && !publicHtml.includes("requestHash") && !publicHtml.includes("operationKey"));
+
+  stage = "trading authorization, reservations, matching, and privacy";
+  const mint = { marketId, operationKey: randomUUID(), quantity: "5" };
+  check((await request("/api/trading/mint", new Map(), mint)).status === 401);
+  check((await request("/api/trading/mint", participantCookies, mint, { csrf: "invalid" })).status === 403);
+  check((await request("/api/trading/mint", participantCookies, mint, { origin: "https://example.invalid" })).status === 403);
+  check((await request("/api/trading/mint", participantCookies, { ...mint, quantity: 5 })).status === 400);
+  check((await request("/api/trading/mint", participantCookies, mint)).status === 200);
+  check((await request("/api/trading/mint", participantCookies, mint)).status === 200);
+  const sell = { marketId, operationKey: randomUUID(), outcome: "YES", side: "sell", price: "2500", quantity: "3", timeInForce: "GTC" };
+  const sellResult = await request("/api/trading/place", participantCookies, sell);
+  check(sellResult.status === 200);
+  const { order: sellOrder } = await sellResult.json();
+  check((await request("/api/trading/cancel", adminCookies, { marketId, operationKey: randomUUID(), orderId: sellOrder.id })).status === 404);
+  check((await request(`/api/markets/${marketId}/portfolio`, new Map())).status === 401);
+  const own = await request(`/api/markets/${marketId}/portfolio?ownerId=${admin.id}`, participantCookies);
+  check(own.headers.get("cache-control")?.includes("no-store"));
+  const ownData = await own.json();
+  check(ownData.holdings.find((h: { outcome: string }) => h.outcome === "YES").reserved === "3");
+  check((await (await request(`/api/markets/${marketId}/portfolio`, adminCookies)).json()).orders.length === 0);
+  const publicBook = await request(`/api/markets/${marketId}/book`, new Map());
+  check(publicBook.headers.get("cache-control")?.includes("no-store"));
+  const bookText = await publicBook.text();
+  for (const value of [participantId, admin.id, sellOrder.id, participantHandle, "ownerId", "reservedCredits"]) check(!bookText.includes(value));
+  check(JSON.parse(bookText).book[0].quantity === "3");
+  check((await request("/api/admin/credits", adminCookies, { recipientId: admin.id, operationKey: randomUUID(), amount: "10", kind: "credit", reason: "demo_grant", confirmed: true })).status === 200);
+  const purchase = await request("/api/trading/place", adminCookies, { ...sell, operationKey: randomUUID(), side: "buy", price: "3000", quantity: "2", timeInForce: "IOC" });
+  check(purchase.status === 200);
+  const purchaseData = await purchase.json();
+  check(purchaseData.order.status === "filled" && purchaseData.fills[0].price === "2500");
+  const sellerPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
+  check(sellerPortfolio.orders[0].remaining === "1" && sellerPortfolio.fills[0].side === "sell");
+  const buyerPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, adminCookies)).json();
+  check(buyerPortfolio.availableCredits === "95000" && buyerPortfolio.reservedCredits === "0" && buyerPortfolio.holdings[0].available === "2");
+  check((await request(`/api/markets/${marketId}/book?before=invalid`, new Map())).status === 400);
+
+  stage = "market pause, resume, and permanent close";
+  const pause = { id: marketId, revision: "2", operationKey: randomUUID(), confirmed: true };
+  check((await request("/api/admin/markets/pause", adminCookies, pause)).status === 200);
+  check((await request("/api/admin/markets/pause", adminCookies, pause)).status === 200);
+  check((await (await request(`/markets/${slug}`, new Map())).text()).includes("The administrator has paused this market"));
+  check((await request("/api/trading/place", adminCookies, { ...sell, side: "buy", operationKey: randomUUID() })).status === 409);
+  check((await request("/api/admin/markets/resume", adminCookies, { ...pause, revision: "3", operationKey: randomUUID() })).status === 200);
+  check((await request("/api/admin/markets/close", adminCookies, { ...pause, revision: "4", operationKey: randomUUID() })).status === 200);
+  check((await request("/api/admin/markets/resume", adminCookies, { ...pause, revision: "5", operationKey: randomUUID() })).status === 409);
+  check((await (await request(`/markets/${slug}`, new Map())).text()).includes("This market is closed"));
+  check((await connection.db.select().from(markets).where(eq(markets.id, marketId)))[0].status === "closed");
+  const closedPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
+  check(closedPortfolio.orders[0].status === "cancelled" && closedPortfolio.holdings.find((h: { outcome: string }) => h.outcome === "YES").reserved === "0");
+
   stage = "client-scoped login isolation";
   for (let i = 0; i < 11; i++) {
     const attempt = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password: "incorrect-password" }, { client: "198.51.100.2" });
@@ -146,7 +241,7 @@ try {
   check((await request("/api/auth/sign-out", participantCookies, {})).status === 200);
   check((await request("/api/account/reauthenticate", participantCookies, { password: replacement })).status === 401);
   check((await request("/api/auth/sign-out", adminCookies, {})).status === 200);
-  console.info("HTTP account, credit, privacy, CSRF, and session workflows passed.");
+  console.info("HTTP accounts, credits, market lifecycle, trading, privacy, CSRF, and session workflows passed.");
 } catch {
   console.error(`HTTP verification failed during ${stage}.`);
   process.exitCode = 1;

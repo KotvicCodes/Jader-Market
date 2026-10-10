@@ -4,6 +4,8 @@ import { getDatabase } from "./client";
 import { markets } from "./schema";
 
 const publicStatuses = ["open", "closed", "proposed", "resolved", "void", "cancelled"] as const;
+// Keep administration revisions and future private fields out of public reads.
+const publicFields = { id: markets.id, slug: markets.slug, question: markets.question, description: markets.description, category: markets.category, resolutionRules: markets.resolutionRules, resolutionSource: markets.resolutionSource, status: markets.status, closesAt: markets.closesAt, publishedAt: markets.publishedAt, synthetic: markets.synthetic, paused: markets.paused };
 
 export async function listMarkets(input: ReturnType<typeof parseMarketQuery>) {
   const connection = getDatabase();
@@ -16,7 +18,7 @@ export async function listMarkets(input: ReturnType<typeof parseMarketQuery>) {
   );
   try {
     const [items, totals] = await Promise.all([
-      connection.db.select().from(markets).where(filters).orderBy(asc(markets.closesAt), asc(markets.id)).limit(input.pageSize).offset((input.page - 1) * input.pageSize),
+      connection.db.select(publicFields).from(markets).where(filters).orderBy(asc(markets.closesAt), asc(markets.id)).limit(input.pageSize).offset((input.page - 1) * input.pageSize),
       connection.db.select({ total: count() }).from(markets).where(filters),
     ]);
     return { state: "ready" as const, items, total: totals[0].total };
@@ -29,7 +31,7 @@ export async function findPublicMarket(slug: string) {
   const connection = getDatabase();
   if (!connection) return { state: "unavailable" as const };
   try {
-    const [market] = await connection.db.select().from(markets).where(and(eq(markets.slug, slug), inArray(markets.status, publicStatuses))).limit(1);
+    const [market] = await connection.db.select(publicFields).from(markets).where(and(eq(markets.slug, slug), inArray(markets.status, publicStatuses))).limit(1);
     return market ? { state: "ready" as const, market } : { state: "missing" as const };
   } catch {
     return { state: "unavailable" as const };

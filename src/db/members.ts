@@ -1,4 +1,6 @@
-import { and, asc, count, desc, eq, gt, ilike, lt, sql } from "drizzle-orm";
+import { cancelTradingOrders } from "./trading";
+import { lockTransactions } from "./transaction-lock";
+import { and, asc, count, desc, eq, ilike, inArray, lt, sql } from "drizzle-orm";
 import { createDatabase, getDatabase } from "./client";
 import { adminAudit, journals, ledgerAccounts, ledgerEntries, rateLimits, sessions, users } from "./schema";
 import { decryptSecret, digest, encryptSecret, hashPassword, MemberError, newMfaSecret, normalizeHandle, parseCredits, randomToken, rateKey, verifyMfa, verifyPassword } from "../domain/identity";
@@ -23,8 +25,9 @@ export async function readSession(token: string | undefined, executor: Executor 
   if (!token || !/^[a-zA-Z0-9_-]{43}$/.test(token)) return undefined;
   const query = executor.select({ tokenHash: sessions.tokenHash, csrfHash: sessions.csrfHash, authenticatedAt: sessions.authenticatedAt, id: users.id, handle: users.handle, role: users.role, mfaSecret: users.mfaSecret })
     .from(sessions).innerJoin(users, eq(users.id, sessions.userId))
-    .where(and(eq(sessions.tokenHash, digest(token)), gt(sessions.expiresAt, new Date()), eq(users.suspended, false))).limit(1);
+    .where(and(eq(sessions.tokenHash, digest(token)), sql`${sessions.expiresAt} > clock_timestamp()`, eq(users.suspended, false))).limit(1);
   if (lock) {
+    await lockTransactions(executor);
     const [preliminary] = await query;
     if (!preliminary) return undefined;
     // Every mutation locks its user before its session to avoid sign-in/logout races.
@@ -76,6 +79,7 @@ export async function signIn(handleInput: unknown, password: unknown, mfaCode: u
   const correct = await verifyPassword(password, candidate?.passwordHash);
   if (!correct || !candidate || candidate.suspended) throw new MemberError("invalid_credentials", 401);
   return db.transaction(async tx => {
+    await lockTransactions(tx);
     const [user] = await tx.select().from(users).where(eq(users.id, candidate.id)).for("update");
     if (!user || user.suspended || user.passwordHash !== candidate.passwordHash) throw new MemberError("invalid_credentials", 401);
     if (user.mfaSecret) {
@@ -170,6 +174,7 @@ export async function bootstrapAdministrator(handleInput: unknown, password: str
   const handle = normalizeHandle(handleInput);
   const passwordHash = await hashPassword(password);
   return memberDatabase().db.transaction(async tx => {
+    await lockTransactions(tx);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(72491947)`);
     if ((await tx.select({ id: users.id }).from(users).where(eq(users.role, "admin")).limit(1)).length) throw new MemberError("admin_exists", 409);
     const [user] = await tx.insert(users).values({ handle, passwordHash, role: "admin" }).returning({ id: users.id });
@@ -202,6 +207,7 @@ export async function manageParticipant(token: string, targetId: unknown, action
     requireAdministrator(actor);
     const [target] = await tx.select().from(users).where(eq(users.id, targetId)).for("update");
     if (!target || target.role !== "participant") throw new MemberError("forbidden", 403);
+    if (action === "suspend") await cancelTradingOrders(tx, { ownerId: target.id }, "account_suspended");
     await tx.update(users).set(passwordHash ? { passwordHash, mfaSecret: null, lastMfaStep: -1 } : { suspended: action === "suspend" }).where(eq(users.id, target.id));
     await tx.delete(sessions).where(eq(sessions.userId, target.id));
     await tx.insert(adminAudit).values({ actorId: actor.user.id, targetId: target.id, action });
@@ -242,7 +248,7 @@ export async function accountSnapshot(token: string, page = 1) {
   const session = await readSession(token, db);
   requireMember(session);
   const balances = await db.select().from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, session.user.id));
-  const history = await db.select({ id: journals.id, kind: journals.kind, reason: journals.reason, amount: journals.amount, createdAt: journals.createdAt }).from(journals).where(eq(journals.recipientId, session.user.id)).orderBy(desc(journals.createdAt), desc(journals.id)).limit(21).offset((page - 1) * 20);
+  const history = await db.select({ id: journals.id, kind: journals.kind, reason: journals.reason, amount: journals.amount, createdAt: journals.createdAt }).from(journals).where(and(eq(journals.recipientId, session.user.id), inArray(journals.kind, ["credit", "debit"]))).orderBy(desc(journals.createdAt), desc(journals.id)).limit(21).offset((page - 1) * 20);
   return { session, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, reserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, history: history.slice(0, 20), hasNext: history.length > 20 };
 }
 
@@ -262,6 +268,7 @@ export async function recoverAdministrator(handleInput: unknown, password: strin
   const handle = normalizeHandle(handleInput);
   const passwordHash = await hashPassword(password);
   await memberDatabase().db.transaction(async tx => {
+    await lockTransactions(tx);
     const [user] = await tx.select().from(users).where(and(eq(users.handle, handle), eq(users.role, "admin"))).for("update");
     if (!user) throw new MemberError("account_unavailable", 404);
     await tx.update(users).set({ passwordHash, mfaSecret: null, lastMfaStep: -1 }).where(eq(users.id, user.id));
