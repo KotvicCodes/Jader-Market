@@ -1,6 +1,6 @@
 # Jader-Market
 
-A prediction market prototype inspired by Polymarket for a small closed community. The administrator is the sole oracle. Payments are settled offline and will be reflected in a private internal ledger.
+A prediction market prototype inspired by Polymarket for a small closed community. The administrator is the sole oracle. Payments are settled offline and recorded in a private internal ledger.
 
 **Status:** accounts and credits prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, and audited credit adjustments are implemented alongside market browsing and practice markets. Actual trading and oracle payouts are not enabled yet.
 
@@ -25,7 +25,7 @@ Administrator setup/recovery, migrations, seeding, and the worker use the existi
 
 Use **Demo credit grant** for prototype credits. Offline credit/debit entries are posted only after the administrator independently confirms the transfer. Debits cannot take an account below zero. These are immediate confirmed adjustments; pending withdrawal requests and reservations will be added with trading. Winning bets will pay from market collateral in the resolution milestone, not mint new credits through a participant endpoint. The `/demo` practice balances remain temporary and separate.
 
-Administrator controls require MFA and authentication within the last 10 minutes. Refresh access on `/account` when prompted. Authenticator codes cannot be reused; wait for a fresh code after sign-in or enrollment before reauthenticating. Sessions expire after 24 hours, and sign-out-all, suspension, and password resets revoke sessions. Participant recovery is handled by the administrator. Sole-administrator recovery uses `npm run admin:recover` on the trusted local host; it resets the administrator password and authenticator, revokes sessions, and records an audit event. It is never available through a public route.
+Administrator controls require MFA and authentication within the last 10 minutes. Refresh access on `/account` when prompted. Authenticator codes cannot be reused; wait for a fresh code after sign-in or enrollment before reauthenticating. Sessions expire after 24 hours, and sign-out-all, suspension, and password resets revoke sessions. Participant recovery is handled by the administrator. Sole-administrator recovery uses `npm run admin:recover` on the trusted local host; it resets the administrator password and authenticator, revokes sessions, and records an audit event. It requires the existing `AUTH_SECRET`; restore that key from the private backup if it is missing. Recovery does not generate a replacement key. It is never available through a public route.
 
 Keep `.env` and its generated `AUTH_SECRET` private and back it up with the private database. Losing or changing the key invalidates existing authenticator secrets. Set `APP_ORIGIN` to the exact browser origin; HTTPS is required beyond loopback, and session cookies are Secure on HTTPS. The local prototype defaults to `http://localhost:3000`.
 
@@ -39,7 +39,7 @@ Passwords use Node's salted scrypt (N=32768, r=8, p=3). Sessions use random opaq
 
 Open `http://localhost:3000/demo` after starting the app. This demo works without PostgreSQL or an account and has four fictional markets, sample probability charts, and practice buy/sell controls. Each market starts with 1,000 temporary demo credits. Choose an outcome, enter a whole number of shares, and submit a practice trade to see the balance and positions update. Selling only allows shares you already hold.
 
-Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. These examples demonstrate the interface; actual accounts, trading, offline funding, and oracle settlement remain the next implementation milestones.
+Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. These examples demonstrate the interface; community trading and oracle settlement remain future milestones. Participant accounts and confirmed offline credit/debit adjustments already use the persistent private ledger.
 
 ## Implementation plan
 
@@ -77,18 +77,18 @@ npm run test:http
 
 Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap and HTTP checks create and drop disposable databases, so the test role needs CREATEDB permission. Other integration suites retain synthetic fixtures in the dedicated test database. HTTP migrations and synthetic account records never modify the configured control database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
-For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. This release is not ready for participant accounts or real-value trading.
+For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Participant accounts and confirmed credit adjustments are available; community trading and oracle payouts remain unfinished.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
 
 ## Planned capabilities
 
-- Market discovery, search, categories, price history, and watchlists.
+- Price history and watchlists for community markets.
 - Collateral-backed YES/NO shares, limit orders, immediate trading, and an order book.
-- Accounts, balances, portfolio valuation, positions, and trade history.
-- Administrator-managed accounts, market creation, direct oracle resolution, and cancellation.
-- Auditable internal accounting and manual credit/debit workflows for offline settlement.
-- Private notifications, accessible responsive screens, automated checks, and self-hosted operations.
+- Portfolio valuation, positions, and trade history.
+- Market creation, direct oracle resolution, and market cancellation.
+- Pending offline settlement requests and reservations.
+- Private notifications and deployment/backup verification.
 
 ## Next steps
 
