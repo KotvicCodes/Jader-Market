@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, getDatabase } from "../../src/db/client";
 import { ledgerAccounts, rateLimits, sessions, users } from "../../src/db/schema";
-import { digest, hashPassword, randomToken, totp } from "../../src/domain/identity";
+import { digest, hashPassword, randomToken, rateKey, totp } from "../../src/domain/identity";
 import { accountSnapshot, adjustCredits, administratorSnapshot, bootstrapAdministrator, changePassword, confirmMfa, createParticipant, manageParticipant, readSession, requireAdministrator, signIn, signOut, startMfa, takeRateLimit } from "../../src/db/members";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -124,6 +124,18 @@ describe("private accounts and administrator credits", () => {
     await signOut(first, true);
     expect(await readSession(first)).toBeUndefined();
     expect(await readSession(second)).toBeUndefined();
+  });
+  it("isolates abusive sign-in attempts by client instead of globally or by handle", async () => {
+    const attacker = "198.51.100.20";
+    for (let i = 0; i < 10; i++) await expect(signIn(handle, "incorrect-password", undefined, undefined, attacker)).rejects.toMatchObject({ code: "invalid_credentials" });
+    await expect(signIn(handle, "changed-synthetic-password", undefined, undefined, attacker)).rejects.toMatchObject({ code: "rate_limited" });
+    expect((await signIn(handle, "changed-synthetic-password", undefined, undefined, "198.51.100.21")).token).toBeTruthy();
+    // Rotating target handles still hits the attacker's client-wide budget.
+    for (let i = 0; i < 19; i++) await expect(signIn(`invalid_${i}`, 0, undefined, undefined, attacker)).rejects.toMatchObject({ code: "invalid_credentials" });
+    await expect(signIn("another_invalid", 0, undefined, undefined, attacker)).rejects.toMatchObject({ code: "rate_limited" });
+    const keys = await connection.db.select({ key: rateLimits.key }).from(rateLimits);
+    expect(keys.some(row => row.key === rateKey("signin_global", "all"))).toBe(false);
+    for (const value of [attacker, "198.51.100.21", handle]) expect(keys.some(row => row.key.includes(value))).toBe(false);
   });
   it("rate-limits attempts without retaining raw handles", async () => {
     await takeRateLimit("test_limit", handle, 1);

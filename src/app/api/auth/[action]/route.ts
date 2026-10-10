@@ -1,3 +1,4 @@
+import { signInClient } from "../../../../auth/login-client";
 import { cookies } from "next/headers";
 import { MemberError } from "../../../../domain/identity";
 import { signIn, signOut } from "../../../../db/members";
@@ -10,7 +11,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ act
     if (action === "sign-in") {
       const body = await readBody(request);
       const previousToken = (await cookies()).get(sessionCookie)?.value;
-      const values = await signIn(body.handle, body.password, body.code, previousToken);
+      const values = await signIn(body.handle, body.password, body.code, previousToken, signInClient(request));
       await setSessionCookies(values);
     } else if (action === "sign-out") {
       const member = await authorizeMutation(request);

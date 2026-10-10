@@ -16,7 +16,12 @@ if (!url || !new URL(url).pathname.endsWith("_test")) {
   console.error("HTTP checks require a dedicated test database.");
   process.exit(1);
 }
-const connection = createDatabase(url);
+const control = createDatabase(url);
+const databaseName = `jader_http_${randomUUID().replaceAll("-", "").slice(0, 16)}_test`;
+const isolatedUrl = new URL(url);
+isolatedUrl.pathname = `/${databaseName}`;
+const connection = createDatabase(isolatedUrl.toString());
+let databaseCreated = false;
 const origin = "http://127.0.0.1:3107";
 const secret = randomBytes(32).toString("hex");
 const password = randomBytes(24).toString("base64url");
@@ -30,8 +35,8 @@ const participantCookies = new Map<string, string>();
 
 function check(condition: unknown) { if (!condition) throw new Error("HTTP assertion failed"); }
 
-async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string } = {}) {
-  const headers: Record<string, string> = { Cookie: Array.from(jar, ([key, value]) => `${key}=${value}`).join("; ") };
+async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string; client?: string } = {}) {
+  const headers: Record<string, string> = { "X-Test-Client-IP": options.client ?? "192.0.2.1", Cookie: Array.from(jar, ([key, value]) => `${key}=${value}`).join("; ") };
   if (body || options.raw) {
     headers["Content-Type"] = "application/json";
     headers.Origin = options.origin ?? origin;
@@ -47,6 +52,8 @@ async function request(path: string, jar: Map<string, string>, body?: Record<str
 }
 
 try {
+  await control.client.unsafe(`CREATE DATABASE "${databaseName}"`);
+  databaseCreated = true;
   await migrate(connection.db, { migrationsFolder: "drizzle" });
   const [admin] = await connection.db.insert(users).values({ handle: adminHandle, role: "admin", passwordHash: await hashPassword(password) }).returning();
   await connection.db.insert(ledgerAccounts).values([{ kind: "wallet", ownerId: admin.id }, { kind: "reserved", ownerId: admin.id }]);
@@ -55,7 +62,7 @@ try {
   mkdirSync(temporaryDirectory, { recursive: true });
   child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3107"], {
     cwd: process.cwd(), stdio: "ignore",
-    env: { ...process.env, DATABASE_URL: url, AUTH_SECRET: secret, APP_ORIGIN: origin, NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
+    env: { ...process.env, DATABASE_URL: isolatedUrl.toString(), AUTH_SECRET: secret, APP_ORIGIN: origin, AUTH_TRUSTED_IP_HEADER: "x-test-client-ip", NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
   });
   let ready = false;
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -118,6 +125,16 @@ try {
   const freshCode = totp(mfaSecret, Math.floor(Date.now() / 30000) + 1);
   check((await request("/api/account/reauthenticate", adminCookies, { password, code: freshCode })).status === 200);
 
+  stage = "client-scoped login isolation";
+  for (let i = 0; i < 11; i++) {
+    const attempt = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password: "incorrect-password" }, { client: "198.51.100.2" });
+    check(attempt.status === (i < 10 ? 401 : 429));
+  }
+  const isolatedLogin = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password }, { client: "198.51.100.3" });
+  check(isolatedLogin.status === 200);
+  const invalidClient = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password }, { client: "198.51.100.3, 198.51.100.4" });
+  check(invalidClient.status === 503 && (await invalidClient.json()).error === "configuration");
+
   stage = "session revocation and password recovery";
   check((await request("/api/admin/suspend", adminCookies, { targetId: participantId, confirmed: true })).status === 200);
   check((await request("/api/account/reauthenticate", participantCookies, { password })).status === 401);
@@ -139,5 +156,16 @@ try {
     await Promise.race([new Promise<void>(resolveExit => child!.once("exit", () => resolveExit())), delay(3000)]);
     if (child.exitCode === null) child.kill("SIGKILL");
   }
-  await connection.client.end();
+  try {
+    await connection.client.end();
+  } finally {
+    try {
+      if (databaseCreated) await control.client.unsafe(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+    } catch {
+      console.error("HTTP verification cleanup failed.");
+      process.exitCode = 1;
+    } finally {
+      await control.client.end();
+    }
+  }
 }
