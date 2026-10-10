@@ -47,6 +47,7 @@ try {
   await getDatabase()!.client`select 1`;
   // Generate the local encryption key once. It is never printed or stored in git.
   if (!process.env.AUTH_SECRET) {
+    if (recover) throw new MemberError("configuration");
     const secret = randomBytes(32).toString("hex");
     const previous = existsSync(".env") ? readFileSync(".env", "utf8") : "";
     const next = /^AUTH_SECRET=.*$/m.test(previous) ? previous.replace(/^AUTH_SECRET=.*$/m, `AUTH_SECRET=${secret}`) : `${previous.trimEnd()}\nAUTH_SECRET=${secret}\n`;
