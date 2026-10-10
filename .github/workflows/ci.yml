@@ -15,7 +15,7 @@ jobs:
           cache: npm
       - run: npm install --global npm@11.21.0
       - run: npm ci
-      - run: npm test -- tests/unit/operator-scripts.test.ts
+      - run: npm test -- tests/unit/operator-scripts.test.ts tests/unit/admin-setup.test.ts
   verify:
     runs-on: ubuntu-latest
     services:
