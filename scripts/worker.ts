@@ -13,7 +13,12 @@ if (!connection) {
 } else {
   try {
     do {
-      await expireTradingOrders();
+      try {
+        await expireTradingOrders();
+      } catch {
+        if (process.argv.includes("--once")) throw new Error("maintenance_failed");
+        console.error("Trading maintenance pass failed; retrying.");
+      }
       if (process.argv.includes("--once") || stopping) break;
       await delay(1000);
     } while (!stopping);
