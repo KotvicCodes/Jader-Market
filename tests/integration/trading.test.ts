@@ -216,6 +216,39 @@ describe("collateral-backed trading", () => {
     await expect(act(bob, "place", id, { timeInForce: "GTD", expiresAt: "2036-01-01T00:00:00Z" })).rejects.toMatchObject({ code: "invalid_order_expiry" });
     await verifyConservation();
   });
+  it.each(["mint", "burn"] as const)("allows %s while expired buy and sell orders await cleanup", async action => {
+    const id = await market();
+    await act(alice, "mint", id);
+    await act(carol, "mint", id);
+    const expiresAt = new Date(Math.ceil((Date.now()+1500)/1000)*1000).toISOString().replace(".000Z", "Z");
+    const sell = await act(alice, "place", id, { side: "sell", price: "7000", quantity: "2", timeInForce: "GTD", expiresAt });
+    const buy = await act(bob, "place", id, { price: "2000", quantity: "2", timeInForce: "GTD", expiresAt });
+    const before = await snapshot(carol, id);
+    const buyerBefore = await snapshot(bob, id);
+    await delay(Math.max(0, Date.parse(expiresAt)-Date.now()+30));
+
+    await act(carol, action, id, { quantity: "1" });
+    const after = await snapshot(carol, id);
+    const change = action === "mint" ? 1n : -1n;
+    expect(BigInt(after.availableCredits)).toBe(BigInt(before.availableCredits)-change*10000n);
+    expect(after.holdings.map(h => h.available)).toEqual([String(5n+change), String(5n+change)]);
+    expect((await snapshot(bob, id)).reservedCredits).toBe(buyerBefore.reservedCredits);
+    expect((await snapshot(alice, id)).holdings.find(h => h.outcome === "YES")?.reserved).toBe("2");
+    for (const [token, result] of [[alice, sell], [bob, buy]] as const) {
+      expect((await snapshot(token, id)).orders.find(o => o.id === (result.order as { id: string }).id)?.status).toBe("open");
+    }
+    await verifyConservation();
+
+    // Both normal cleanup paths still release stale credit and share reservations.
+    if (action === "mint") expect(await expireTradingOrders()).toBeGreaterThanOrEqual(2);
+    else await act(bob, "cancel", id, { orderId: (buy.order as { id: string }).id });
+    for (const [token, result] of [[alice, sell], [bob, buy]] as const) {
+      expect((await snapshot(token, id)).orders.find(o => o.id === (result.order as { id: string }).id)?.status).toBe("expired");
+    }
+    expect(BigInt((await snapshot(bob, id)).reservedCredits)).toBe(BigInt(buyerBefore.reservedCredits)-4000n);
+    expect((await snapshot(alice, id)).holdings.find(h => h.outcome === "YES")?.reserved).toBe("0");
+    await verifyConservation();
+  });
   it("bounds order and execution history with stable cursors and enforces open-order limits", async () => {
     const id = await market();
     for (let i = 0; i < 51; i++) await act(bob, "place", id, { quantity: "1", timeInForce: "IOC" });

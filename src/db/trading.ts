@@ -91,7 +91,8 @@ export async function mutateTrading(token: string, action: TradingAction, input:
     const [market] = await tx.select().from(markets).where(eq(markets.id, ctx.marketId)).for("update");
     if (!market || market.status === "draft") throw new MemberError("market_missing", 404);
     if (parsed.action !== "cancel" && effectiveMarketStatus(market) !== "open") throw new MemberError("trading_closed", 409);
-    await cleanMarket(tx, ctx);
+    // Complete-set operations must only contain their own mint/burn movements.
+    if (parsed.action === "place" || parsed.action === "cancel") await cleanMarket(tx, ctx);
     let response: Record<string, unknown>;
     if (parsed.action === "cancel") {
       const [order] = await tx.select().from(orders).where(and(eq(orders.id, parsed.orderId), eq(orders.marketId, ctx.marketId), eq(orders.ownerId, member.user.id))).for("update");
