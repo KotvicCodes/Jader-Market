@@ -55,7 +55,7 @@ The migration retains administrator-only issuance guards and adds trading journa
 
 ## Quick verification
 
-Use a dedicated disposable PostgreSQL database whose name ends in `_test`, configured as `TEST_DATABASE_URL`. The database role needs `CREATEDB` for the isolated integration suites. Never point tests at the community database. The HTTP suite leaves only synthetic test records in its configured test database.
+Use a dedicated disposable PostgreSQL database whose name ends in `_test`, configured as `TEST_DATABASE_URL`. The database role needs `CREATEDB` for the isolated integration and HTTP suites. Never point tests at the community database. HTTP migrations and fixtures use a disposable per-run database and leave the configured test database unchanged. Production sign-in requires the trusted proxy configuration described in README; the HTTP suite supplies a synthetic trusted header on its loopback test server.
 
 ```sh
 npm run typecheck

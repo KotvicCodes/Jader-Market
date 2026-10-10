@@ -27,10 +27,19 @@ beforeAll(async () => {
   await migrate(connection.db, { migrationsFolder: "drizzle" });
 });
 afterAll(async () => {
-  await connection.client.end();
-  await getDatabase()?.client.end();
-  if (created) await control.client.unsafe(`DROP DATABASE "${name}"`);
-  await control.client.end();
+  try {
+    await connection.client.end();
+  } finally {
+    try {
+      await getDatabase()?.client.end();
+    } finally {
+      try {
+        if (created) await control.client.unsafe(`DROP DATABASE "${name}" WITH (FORCE)`);
+      } finally {
+        await control.client.end();
+      }
+    }
+  }
 });
 
 describe("market storage", () => {
