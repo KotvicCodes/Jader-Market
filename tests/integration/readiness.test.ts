@@ -43,6 +43,10 @@ describe("application readiness", () => {
     vi.stubEnv("AUTH_TRUSTED_IP_HEADER", "x-real-ip");
     vi.stubEnv("APP_ORIGIN", "http://example.invalid");
     expect((await GET()).status).toBe(503);
+    vi.stubEnv("APP_ORIGIN", undefined);
+    const missingOrigin = await GET();
+    expect(missingOrigin.status).toBe(503);
+    expect(await missingOrigin.json()).toEqual({ status: "unavailable", code: "APPLICATION_NOT_READY" });
     vi.stubEnv("APP_ORIGIN", "https://example.invalid");
     const response = await GET();
     expect(response.status).toBe(200);

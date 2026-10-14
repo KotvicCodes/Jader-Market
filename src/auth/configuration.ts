@@ -1,6 +1,7 @@
 import { MemberError } from "../domain/identity";
 
 export function appOrigin() {
+  if (process.env.NODE_ENV === "production" && !process.env.APP_ORIGIN) throw new MemberError("configuration", 503);
   const url = new URL(process.env.APP_ORIGIN ?? "http://localhost:3000");
   if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new MemberError("configuration", 503);
   return url.origin;
