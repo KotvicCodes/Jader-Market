@@ -14,7 +14,9 @@ export default async function MarketPage({ params }: { params: Promise<{ slug: s
   if (result.state !== "ready") return <div className="empty"><h1>Market temporarily unavailable</h1><p>Please try again later.</p><Link href="/">Back to markets</Link></div>;
   const { market } = result;
   let trading;
-  try { trading = await publicTradingSnapshot(market.id); } catch {}
+  try { trading = await publicTradingSnapshot(market.id); } catch {
+    console.error("MARKET_ORDER_BOOK_UNAVAILABLE");
+  }
   const status = trading?.status ?? effectiveMarketStatus(market);
   return <>
     <Link href="/" className="back">← Markets</Link><div className="page-heading"><div><p className="eyebrow">{market.category}</p><h1>{market.question}</h1></div><span className="badge">{status}</span></div>
