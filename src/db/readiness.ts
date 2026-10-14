@@ -9,7 +9,7 @@ export async function assertDatabaseReady(db: Database | Transaction) {
   if (!records.length) throw new Error("database_not_ready");
   // Also check capabilities: a migration marker alone is insufficient after an
   // incomplete restore. LIMIT 0 validates columns without reading private rows.
-  await db.execute(sql`SELECT m.paused, m.revision, u.mfa_secret, s.pending_mfa,
+  await db.execute(sql`SELECT m.paused, m.revision, u.mfa_secret, u.password_hash, s.pending_mfa,
     a.market_id, j.trading_operation_id, h.reserved, o.remaining, f.quantity,
     t.response, b.payload, ma.revision
     FROM markets m, users u, sessions s, ledger_accounts a, journals j,

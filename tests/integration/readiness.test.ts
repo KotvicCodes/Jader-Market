@@ -48,6 +48,15 @@ describe("application readiness", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "ready" });
   });
+  it("rejects a restore missing password hashes while migration markers remain", async () => {
+    await connection.client.unsafe("ALTER TABLE users DROP COLUMN password_hash");
+    try {
+      await expect(assertDatabaseReady(connection.db)).rejects.toThrow();
+      expect((await GET()).status).toBe(503);
+    } finally {
+      await connection.client.unsafe("ALTER TABLE users ADD COLUMN password_hash text NOT NULL");
+    }
+  });
   it("rejects an incomplete restore even if migration markers remain", async () => {
     await connection.client.unsafe("ALTER TABLE sessions DROP COLUMN pending_mfa");
     expect((await GET()).status).toBe(503);
