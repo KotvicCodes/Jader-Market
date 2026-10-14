@@ -3,6 +3,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { getDatabase } from "../src/db/client";
 import { expireTradingOrders } from "../src/db/trading";
 
+import { settleMarkets } from "../src/db/settlement";
+
 const connection = getDatabase();
 let stopping = false;
 process.on("SIGTERM", () => { stopping = true; });
@@ -15,6 +17,7 @@ if (!connection) {
     do {
       try {
         await expireTradingOrders();
+        await settleMarkets();
       } catch {
         if (process.argv.includes("--once")) throw new Error("maintenance_failed");
         console.error("Trading maintenance pass failed; retrying.");

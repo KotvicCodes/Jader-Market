@@ -1,6 +1,6 @@
 # Trading backend prototype
 
-This milestone adds PostgreSQL-backed trading APIs. The trading interface and sole-oracle payouts are the next two milestones. Existing practice markets remain a separate simulation; their temporary balances do not fund real orders.
+This milestone adds PostgreSQL-backed trading APIs. Direct sole-oracle resolution and collateral-funded payouts are implemented; the participant trading interface remains a future milestone. Existing practice markets remain a separate simulation; their temporary balances do not fund real orders.
 
 ## Rules
 
@@ -11,7 +11,7 @@ This milestone adds PostgreSQL-backed trading APIs. The trading interface and so
 - Matching uses best price, then the resting order's database sequence. Execution uses the resting order's price. Buy orders reserve their limit price multiplied by quantity. Price improvement returns to available credits immediately.
 - Selling requires owned shares. The engine reserves shares before matching and never permits naked selling. Self-trading cancels the newest order's remaining quantity, preserving any earlier fills.
 - GTC rests until cancellation or market closure. GTD requires a future explicit UTC expiry at or before the market deadline. IOC executes within its limit and cancels any remainder. Unbounded market orders are unavailable.
-- A paused market keeps its resting reservations and rejects new orders, minting and burning. Owners can cancel during a pause. Permanent closure and account suspension cancel affected orders and release reservations atomically. Minting and burning also stop at the market deadline; payout redemption will be separate.
+- A paused market keeps its resting reservations and rejects new orders, minting and burning. Owners can cancel during a pause. Permanent closure and account suspension cancel affected orders and release reservations atomically. Minting and burning also stop at the market deadline; final payouts run through the maintenance worker.
 - There are at most 100 open orders per owner across markets and 200 per market. New orders beyond those limits are rejected. Book depth is bounded by the market limit. The matching transaction examines at most 200 resting orders.
 - Seeded synthetic browsing examples do not accept mint/burn/place operations. Owners can still cancel legacy orders; maintenance also cancels them.
 - Participants cannot generate credits. Trade proceeds and burns move already-backed credits. Only the administrator can issue credits through the existing credit controls.
@@ -31,11 +31,23 @@ Mutation requests require the existing authenticated session, exact `Origin`, JS
 
 Each mutation needs a fresh operation UUID. Retrying the same normalized request returns its immutable original response, including after its order has expired or its market has closed. Reusing a key for different input or another owner returns `operation_conflict`. Authentication and account state are checked on every retry. GTD retries validate the original expiry's syntax before replay lookup, then check its time only for a new operation.
 
-Order state is `open`, `filled`, `cancelled`, or `expired`. Terminal cancelled/expired orders retain their unfilled `remaining` for audit; they reserve nothing. A fill's winning-share value is not yet paid out automatically. Oracle resolution and payout accounting are a subsequent PR.
+Order state is `open`, `filled`, `cancelled`, or `expired`. Terminal cancelled/expired orders retain their unfilled `remaining` for audit; they reserve nothing. Final share entitlements are paid from escrow after administrator resolution.
 
 Reads use consistent database snapshots. Public fills and private order history have pages of 50, with a decimal `nextCursor`; pass `?before=CURSOR` for the next page. Private fill history has its own `nextFillCursor` and `?beforeFill=CURSOR`. Private executions identify only the owner's order and side. Draft markets return 404 from both reads and trading operations.
 
-The existing portfolio page's balance history remains limited to administrator credit/debit adjustments. Trading history is available through the private API until the trading UI PR.
+The portfolio displays administrator credit/debit history and a separate private payout-receipt table in the same balance snapshot. Trading history is available through the private API until the trading UI PR.
+
+## Final resolution and payouts
+
+Published terms include a fixed binary payout policy: YES or NO pays 10,000 ticks per winning share and zero per losing share; invalid pays 5,000 ticks per share of either outcome. The administrator is the sole oracle and there is no challenge period or reversal endpoint.
+
+First explicitly close the market (including markets whose deadline has passed), releasing all resting reservations. On its administration page, choose YES, NO, or invalid, provide 20–2,000 characters of public evidence, and confirm the permanent decision. `POST /api/admin/markets/resolve` accepts `{ "id": "UUID", "revision": 5, "operationKey": "UUID", "result": "YES", "evidence": "Public evidence supporting the published rules.", "confirmed": true }`. It requires administrator MFA, recent authentication, origin/CSRF checks, and the current revision. Identical retries return the original response; changes using the same key conflict. Evidence, result, actor and time are immutable.
+
+Resolution changes `closed` to `settling`. The worker processes one settling market and at most 20 holdings per pass. Each receipt consumes at most 1,000,000 shares, keeping journals within their existing amount limit. Zero-value losing shares also receive a receipt and are consumed. Each batch atomically transfers collateral, records receipts/journals/share movements, and emits private portfolio invalidations. A failed transaction rolls back the whole batch; remaining shares are the durable work queue after restart. Concurrent workers share the financial lock. Suspended holders are paid without requiring a participant session.
+
+Only when every holding and reservation is zero and escrow is empty does the worker change the market to `resolved` (YES/NO) or `void` (invalid). A final public invalidation accompanies completion. The public page shows result/evidence and distinguishes settlement in progress from completed payouts. `GET /api/account/payouts?page=1` and `/portfolio` show only the session owner's receipts, including zero-value outcomes, share quantities, credits, timestamps, and market links. Receipt API amounts and quantities are decimal strings; responses disable caching. Ownership parameters are ignored. Synthetic browsing markets with legacy collateral may be closed and invalidated through this same process.
+
+Apply migration 0005 before deployment. It extends existing journal, share, collateral and lifecycle guards while preserving issuance restrictions and immutable published terms. Settlement uses integer arithmetic throughout and never issues new credits. Keep the worker supervised; `--once` performs one bounded batch, so a scheduler must repeat passes for larger markets.
 
 ## Worker and event delivery
 
@@ -67,7 +79,7 @@ npm run build
 npm run test:http
 ```
 
-The integration suite exercises mint/burn, resting-price execution in both directions, FIFO, partial fills, reservations, refunds, IOC/GTD/GTC, cancel-newest self-trade prevention, concurrent retries, cross-market overspending, share races, cancellation/fill and closure races, suspension, expiry, history bounds and database tampering. A deterministic mixed trading sequence checks collateral conservation after each step.
+The settlement suite additionally covers all final results, distributed holdings, suspended owners, bounded batches, concurrent resolution/workers, interrupted transactions, zero-value receipts, and database tampering. The integration suite exercises mint/burn, resting-price execution in both directions, FIFO, partial fills, reservations, refunds, IOC/GTD/GTC, cancel-newest self-trade prevention, concurrent retries, cross-market overspending, share races, cancellation/fill and closure races, suspension, expiry, history bounds and database tampering. A deterministic mixed trading sequence checks collateral conservation after each step.
 
 The production HTTP suite creates synthetic administrator/participant accounts, signs in, grants internal credits, publishes a non-synthetic market, mints pairs, places an ask and executes a purchase from a second account. A separate check confirms that minting on a synthetic browsing market returns HTTP 409. It checks CSRF/origin protections, owner isolation, anonymous depth, partial fills, balances, private execution history and close-time releases, and confirms the built health version matches `package.json`. It finishes with a pass/fail message containing no credentials or user values.
 

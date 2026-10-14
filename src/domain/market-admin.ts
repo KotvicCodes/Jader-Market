@@ -1,6 +1,6 @@
 import { MemberError } from "./identity";
 
-export const marketActions = ["create", "edit", "publish", "pause", "resume", "close"] as const;
+export const marketActions = ["create", "edit", "publish", "pause", "resume", "close", "resolve"] as const;
 export type MarketAction = typeof marketActions[number];
 
 export function marketUuid(input: unknown): string {
@@ -41,3 +41,10 @@ export function effectiveMarketStatus(market: { status: string; paused: boolean;
   if (market.closesAt.getTime() <= now) return "closed";
   return market.paused ? "paused" : "open";
 }
+
+export function parseResolution(input: Record<string, unknown>): { result: "YES" | "NO" | "invalid"; evidence: string } {
+  if (input.result !== "YES" && input.result !== "NO" && input.result !== "invalid") throw new MemberError("invalid_request");
+  return { result: input.result, evidence: text(input.evidence, 20, 2000) };
+}
+
+export const payoutPolicy = "YES or NO pays 1 credit per winning share and 0 per losing share. An invalid result refunds 0.5 credits per YES share and 0.5 per NO share. The administrator is the sole oracle; resolutions are final.";
