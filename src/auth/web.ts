@@ -2,15 +2,11 @@ import { cookies } from "next/headers";
 import { timingSafeEqual } from "node:crypto";
 import { digest, MemberError } from "../domain/identity";
 import { readSession, requireMember, takeRateLimit } from "../db/members";
+import { appOrigin } from "./configuration";
+export { appOrigin } from "./configuration";
 
 export const sessionCookie = "jader_session";
 export const csrfCookie = "jader_csrf";
-
-export function appOrigin() {
-  const url = new URL(process.env.APP_ORIGIN ?? "http://localhost:3000");
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) throw new MemberError("configuration", 503);
-  return url.origin;
-}
 
 export function assertOrigin(request: Request) {
   if (request.headers.get("origin") !== appOrigin()) throw new MemberError("invalid_origin", 403);
