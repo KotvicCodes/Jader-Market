@@ -4,7 +4,7 @@ import { digest, MemberError } from "../domain/identity";
 import { effectiveMarketStatus, marketUuid } from "../domain/market-admin";
 import { creditTicks, maxMarketOrders, maxOpenOrders, parseTrading, type Outcome, type TradingAction } from "../domain/trading";
 import { memberDatabase, readSession, requireMember } from "./members";
-import { fills, holdings, journals, ledgerAccounts, ledgerEntries, marketDeadlineEvents, markets, orders, shareMovements, tradingOperations, tradingOutbox, users } from "./schema";
+import { fills, holdings, journals, ledgerAccounts, ledgerEntries, markets, orders, shareMovements, tradingOperations, tradingOutbox, users } from "./schema";
 import { lockTransactions, type Transaction } from "./transaction-lock";
 
 type Order = typeof orders.$inferSelect;
@@ -65,13 +65,13 @@ async function finishOperation(tx: Transaction, ctx: Context, action: string, re
 }
 
 async function cleanMarket(tx: Transaction, ctx: Context) {
-  const stale = await tx.select({ order: orders, suspended: users.suspended, status: markets.status, closesAt: markets.closesAt, synthetic: markets.synthetic })
+  const stale = await tx.select({ order: orders, suspended: users.suspended, status: markets.status, deadlinePassed: sql<boolean>`${markets.closesAt} <= clock_timestamp()`, synthetic: markets.synthetic })
     .from(orders).innerJoin(users, eq(users.id, orders.ownerId)).innerJoin(markets, eq(markets.id, orders.marketId))
     .where(and(eq(orders.marketId, ctx.marketId), eq(orders.status, "open"), or(eq(users.suspended, true), eq(markets.synthetic, "yes"), sql`${markets.status} <> 'open'`, sql`${markets.closesAt} <= clock_timestamp()`, sql`${orders.expiresAt} <= clock_timestamp()`)))
     .orderBy(asc(orders.sequence)).for("update", { of: orders });
   for (const record of stale) {
     const suspended = record.suspended;
-    await releaseOrder(tx, ctx, record.order, suspended || record.synthetic === "yes" || record.status !== "open" ? "cancelled" : "expired", suspended ? "account_suspended" : record.synthetic === "yes" ? "synthetic_unavailable" : record.status !== "open" || record.closesAt.getTime() <= Date.now() ? "market_closed" : "time_expired");
+    await releaseOrder(tx, ctx, record.order, suspended || record.synthetic === "yes" || record.status !== "open" ? "cancelled" : "expired", suspended ? "account_suspended" : record.synthetic === "yes" ? "synthetic_unavailable" : record.status !== "open" || record.deadlinePassed ? "market_closed" : "time_expired");
   }
   return stale.length;
 }
@@ -213,8 +213,12 @@ export async function expireTradingOrders() {
       const ctx: Context = { id: randomUUID(), ownerId: null, marketId };
       const count = await cleanMarket(tx, ctx);
       let deadline = false;
-      if (market.status === "open" && market.closesAt.getTime() <= Date.now()) {
-        deadline = (await tx.insert(marketDeadlineEvents).values({ marketId, operationId: ctx.id }).onConflictDoNothing().returning()).length > 0;
+      if (market.status === "open") {
+        const inserted = await tx.execute(sql`INSERT INTO market_deadline_events (market_id, operation_id)
+          SELECT ${marketId}, ${ctx.id} FROM markets
+          WHERE id=${marketId} AND status='open' AND closes_at<=clock_timestamp()
+          ON CONFLICT DO NOTHING RETURNING market_id`);
+        deadline = inserted.length > 0;
       }
       if (count || deadline) { expired += count; await finishOperation(tx, ctx, "maintenance", digest("expiry"), { expired: count, deadline }); }
     }
