@@ -1,5 +1,6 @@
 import { cancelTradingOrders } from "./trading";
 import { lockTransactions } from "./transaction-lock";
+import { recordCreditChange } from "./events";
 import { and, asc, count, desc, eq, ilike, inArray, lt, sql } from "drizzle-orm";
 import { createDatabase, getDatabase } from "./client";
 import { adminAudit, journals, ledgerAccounts, ledgerEntries, rateLimits, sessions, users } from "./schema";
@@ -239,17 +240,19 @@ export async function adjustCredits(token: string, input: { recipientId: unknown
     const [journal] = await tx.insert(journals).values({ operationKey, requestHash, actorId: actor.user.id, recipientId, amount, kind, reason }).returning({ id: journals.id });
     const change = kind === "credit" ? amount : -amount;
     await tx.insert(ledgerEntries).values(accounts.map(account => ({ journalId: journal.id, accountId: account.id, delta: account.id === wallet.id ? change : -change })));
+    await recordCreditChange(tx, journal.id, recipientId);
     return journal.id;
   });
 }
 
 export async function accountSnapshot(token: string, page = 1) {
-  const db = memberDatabase().db;
-  const session = await readSession(token, db);
-  requireMember(session);
-  const balances = await db.select().from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, session.user.id));
-  const history = await db.select({ id: journals.id, kind: journals.kind, reason: journals.reason, amount: journals.amount, createdAt: journals.createdAt }).from(journals).where(and(eq(journals.recipientId, session.user.id), inArray(journals.kind, ["credit", "debit"]))).orderBy(desc(journals.createdAt), desc(journals.id)).limit(21).offset((page - 1) * 20);
-  return { session, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, reserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, history: history.slice(0, 20), hasNext: history.length > 20 };
+  return memberDatabase().db.transaction(async db => {
+    const session = await readSession(token, db);
+    requireMember(session);
+    const balances = await db.select().from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, session.user.id));
+    const history = await db.select({ id: journals.id, kind: journals.kind, reason: journals.reason, amount: journals.amount, createdAt: journals.createdAt }).from(journals).where(and(eq(journals.recipientId, session.user.id), inArray(journals.kind, ["credit", "debit"]))).orderBy(desc(journals.createdAt), desc(journals.id)).limit(21).offset((page - 1) * 20);
+    return { session, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, reserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, history: history.slice(0, 20), hasNext: history.length > 20 };
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 export async function administratorSnapshot(token: string, page = 1, query = "") {

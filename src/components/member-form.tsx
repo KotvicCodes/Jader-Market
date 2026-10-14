@@ -9,6 +9,7 @@ const errors: Record<string, string> = {
   invalid_password: "Use a password between 12 and 128 characters.",
   handle_unavailable: "That handle is unavailable. Choose another.",
   invalid_amount: "Enter a positive credit amount, up to 1,000,000, with at most four decimal places.",
+  trading_unavailable: "This browsing example does not accept persistent trades.",
   insufficient_credits: "This account does not have enough available credits for that debit.",
   account_unavailable: "This account is unavailable. Refresh the account list.",
   operation_conflict: "This adjustment reference was already used. Check balance history before starting a new adjustment.",

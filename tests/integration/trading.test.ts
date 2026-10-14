@@ -72,6 +72,23 @@ describe("collateral-backed trading", () => {
     await expect(act(bob, "place", id, { side: "sell" })).rejects.toMatchObject({ code: "insufficient_shares" });
     await verifyConservation();
   });
+  it("rejects persistent trading in synthetic browsing examples", async () => {
+    const id = await market({ synthetic: "yes" });
+    const before = await snapshot(alice, id);
+    for (const action of ["mint", "burn", "place"] as const) await expect(act(alice, action, id)).rejects.toMatchObject({ code: "trading_unavailable" });
+    expect((await snapshot(alice, id)).availableCredits).toBe(before.availableCredits);
+    expect((await publicTradingSnapshot(id)).executable).toBe(false);
+    expect((await publicTradingSnapshot(id)).book).toEqual([]);
+    await verifyConservation();
+  });
+  it("records deadline invalidation once even when there are no orders", async () => {
+    const id = await market({ closesAt: new Date(Date.now() - 1000) });
+    await expireTradingOrders();
+    const first = await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id));
+    expect(first).toMatchObject([{ ownerId: null, event: "market.changed", payload: {} }]);
+    await expireTradingOrders();
+    expect(await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id))).toEqual(first);
+  });
   it("matches buy takers at maker price with partial fills and immediate improvement refunds", async () => {
     const id = await market();
     await act(alice, "mint", id);

@@ -10,6 +10,7 @@ import { createDatabase } from "../src/db/client";
 import { ledgerAccounts, markets, sessions, users } from "../src/db/schema";
 import { digest, hashPassword, totp } from "../src/domain/identity";
 import { version } from "../package.json";
+import { syntheticMarkets } from "../src/db/fixtures";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.endsWith("_test")) {
@@ -195,6 +196,12 @@ try {
   const bookText = await publicBook.text();
   for (const value of [participantId, admin.id, sellOrder.id, participantHandle, "ownerId", "reservedCredits"]) check(!bookText.includes(value));
   check(JSON.parse(bookText).book[0].quantity === "3");
+  const bookPage = await (await request(`/markets/${slug}`, new Map())).text();
+  check(bookPage.includes("Ask") && bookPage.includes("0.25") && !bookPage.includes("No executable orders"));
+  const [browsingExample] = await connection.db.insert(markets).values(syntheticMarkets[0]).returning();
+  check((await request("/api/trading/mint", participantCookies, { ...mint, marketId: browsingExample.id, operationKey: randomUUID() })).status === 409);
+  check((await (await request(`/api/markets/${browsingExample.id}/book`, new Map())).json()).executable === false);
+  check((await (await request(`/markets/${browsingExample.slug}`, new Map())).text()).includes("Browsing example only"));
   check((await request("/api/admin/credits", adminCookies, { recipientId: admin.id, operationKey: randomUUID(), amount: "10", kind: "credit", reason: "demo_grant", confirmed: true })).status === 200);
   const purchase = await request("/api/trading/place", adminCookies, { ...sell, operationKey: randomUUID(), side: "buy", price: "3000", quantity: "2", timeInForce: "IOC" });
   check(purchase.status === 200);

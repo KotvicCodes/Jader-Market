@@ -209,10 +209,20 @@ export const shareMovements = pgTable("share_movements", {
 
 export const tradingOutbox = pgTable("trading_outbox", {
   sequence: bigint("sequence", { mode: "bigint" }).primaryKey().generatedAlwaysAsIdentity(),
-  operationId: uuid("operation_id").notNull(),
-  marketId: uuid("market_id").notNull().references(() => markets.id),
+  operationId: uuid("operation_id"),
+  journalId: uuid("journal_id").references(() => journals.id),
+  marketId: uuid("market_id").references(() => markets.id),
   ownerId: uuid("owner_id").references(() => users.id),
   event: text("event").notNull(),
   payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [index("outbox_scope_index").on(table.marketId, table.ownerId, table.sequence)]);
+}, table => [
+  index("outbox_scope_index").on(table.marketId, table.ownerId, table.sequence),
+  check("outbox_source_valid", sql`(${table.operationId} IS NOT NULL) <> (${table.journalId} IS NOT NULL)`),
+]);
+
+export const marketDeadlineEvents = pgTable("market_deadline_events", {
+  marketId: uuid("market_id").primaryKey().references(() => markets.id),
+  operationId: uuid("operation_id").notNull().references(() => tradingOperations.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

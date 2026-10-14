@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, getDatabase } from "../../src/db/client";
-import { ledgerAccounts, rateLimits, sessions, users } from "../../src/db/schema";
+import { ledgerAccounts, rateLimits, sessions, tradingOutbox, users } from "../../src/db/schema";
 import { digest, hashPassword, randomToken, rateKey, totp } from "../../src/domain/identity";
 import { accountSnapshot, adjustCredits, administratorSnapshot, bootstrapAdministrator, changePassword, confirmMfa, createParticipant, manageParticipant, readSession, requireAdministrator, signIn, signOut, startMfa, takeRateLimit } from "../../src/db/members";
 
@@ -70,6 +70,9 @@ describe("private accounts and administrator credits", () => {
     const snapshot = await accountSnapshot(userToken);
     expect(snapshot.available).toBe(1_000_000n);
     expect(snapshot.history).toHaveLength(1);
+    const events = await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.ownerId, userId));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ marketId: null, operationId: null, journalId: ids[0], event: "portfolio.changed", payload: {} });
     await expect(grant("101", key)).rejects.toMatchObject({ code: "operation_conflict" });
     await expect(adjustCredits(adminToken, { recipientId: userId, amount: "100", kind: "credit", reason: "demo_grant", operationKey: randomUUID(), confirmed: false })).rejects.toMatchObject({ code: "invalid_request" });
   });
@@ -78,6 +81,18 @@ describe("private accounts and administrator credits", () => {
     expect(attempts.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect((await accountSnapshot(userToken)).available).toBe(200_000n);
     expect((await accountSnapshot(userToken)).history).toHaveLength(2);
+  });
+  it("returns consistent balances and history while credits are committed concurrently", async () => {
+    const concurrentHandle = `snapshot_user_${suffix}`;
+    const recipientId = await createParticipant(adminToken, concurrentHandle, password);
+    const token = (await signIn(concurrentHandle, password, undefined)).token;
+    const credits = Array.from({ length: 20 }, () => adjustCredits(adminToken, { recipientId, amount: "1", kind: "credit", reason: "demo_grant", operationKey: randomUUID(), confirmed: true }));
+    const reads = Array.from({ length: 20 }, async () => {
+      const result = await accountSnapshot(token);
+      expect(result.available).toBe(result.history.reduce((total, entry) => total + (entry.kind === "credit" ? entry.amount : -entry.amount), 0n));
+    });
+    await Promise.all([...credits, ...reads]);
+    expect((await accountSnapshot(token)).available).toBe(200000n);
   });
   it("keeps balance history scoped to the session's owner and supports admin pagination", async () => {
     const otherHandle = `other_user_${suffix}`;

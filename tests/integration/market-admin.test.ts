@@ -6,7 +6,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, getDatabase } from "../../src/db/client";
 import { administratorMarket, administratorMarkets, mutateMarket } from "../../src/db/market-admin";
 import { findPublicMarket, listMarkets } from "../../src/db/markets";
-import { marketAudit, markets, sessions, users } from "../../src/db/schema";
+import { marketAudit, markets, sessions, tradingOutbox, users } from "../../src/db/schema";
 import { digest, encryptSecret, randomToken } from "../../src/domain/identity";
 import { parseMarketQuery } from "../../src/domain/market-query";
 
@@ -51,6 +51,9 @@ describe("administrator market lifecycle", () => {
     expect((await listMarkets(parseMarketQuery({}))).total).toBe(0);
     expect((await findPublicMarket(`market-${id}`)).state).toBe("missing");
     expect((await administratorMarket(adminToken, id, 1)).history).toHaveLength(1);
+    const events = await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ ownerId: (await connection.db.select().from(users).where(eq(users.role, "admin")))[0].id, event: "market.admin.changed", payload: {} });
     await expect(mutateMarket(adminToken, "create", { ...terms, question: "A changed fictional question?", operationKey })).rejects.toMatchObject({ code: "market_operation_conflict" });
   });
   it("blocks participants, expired administrator authentication, and missing confirmations", async () => {
@@ -93,6 +96,8 @@ describe("administrator market lifecycle", () => {
     expect(snapshot.market.status).toBe("closed");
     expect(snapshot.market.paused).toBe(false);
     expect(snapshot.history.map(row => row.action)).toContain("close");
+    const events = await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id));
+    expect(events.filter(event => event.ownerId === null && event.event === "market.changed")).toHaveLength(4);
     await expect(connection.db.update(marketAudit).set({ action: "resume" }).where(eq(marketAudit.marketId, id))).rejects.toThrow();
     await expect(connection.db.delete(marketAudit).where(eq(marketAudit.marketId, id))).rejects.toThrow();
   });
