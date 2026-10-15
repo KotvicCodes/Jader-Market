@@ -75,7 +75,7 @@ npm run dev
 
 Open `http://localhost:3000`. The three seed markets are clearly labelled fictional examples, and running the seed again does not duplicate them. The local database port binds to loopback only. All example credentials are synthetic development values and must be replaced before deployment. Keep `.env` private.
 
-The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the current migrations and required schema, authentication key, origin, and production trusted-proxy header configuration are available. Readiness does not certify proxy networking or worker health; verify those during deployment. `npm run worker` performs durable order-expiry maintenance. Use `npm run worker -- --once` for one pass, or keep the worker running for periodic expiry checks.
+The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the current migrations, required schema and enabled application triggers, authentication key, origin, and production trusted-proxy header configuration are available. Readiness does not certify proxy networking or worker health; verify those during deployment. `npm run worker` performs durable order-expiry maintenance. Use `npm run worker -- --once` for one pass, or keep the worker running for periodic expiry checks.
 
 ## Verification
 
