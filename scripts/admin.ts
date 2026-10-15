@@ -33,7 +33,9 @@ async function configureAdministrator(handle: string, password: string, recover:
         (await operator`SELECT token_hash FROM sessions WHERE pending_mfa IS NOT NULL LIMIT 1`).length) throw new MemberError("configuration");
       const secret = randomBytes(32).toString("hex");
       const source = previous ?? "";
-      const next = /^AUTH_SECRET=.*$/m.test(source) ? source.replace(/^AUTH_SECRET=.*$/m, `AUTH_SECRET=${secret}`) : `${source.trimEnd()}\nAUTH_SECRET=${secret}\n`;
+      // dotenv uses the last assignment, including exported/whitespace variants.
+      // Append so a later empty duplicate cannot mask the generated key on reload.
+      const next = `${source.trimEnd()}\nAUTH_SECRET=${secret}\n`;
       writeFileSync(temporary, next, { mode: 0o600, flag: "wx" });
       renameSync(temporary, ".env");
       written = next;
