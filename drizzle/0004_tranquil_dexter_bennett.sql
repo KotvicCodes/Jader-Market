@@ -27,7 +27,8 @@ $$;
 CREATE CONSTRAINT TRIGGER deadline_event_guard AFTER INSERT ON market_deadline_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION verify_deadline_event();
 CREATE FUNCTION reject_synthetic_trading() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF NEW.action IN ('mint','burn','place') AND EXISTS (SELECT 1 FROM markets WHERE id=NEW.market_id AND synthetic='yes') THEN
+  -- Legacy complete sets can still return their collateral; never add supply or orders.
+  IF NEW.action IN ('mint','place') AND EXISTS (SELECT 1 FROM markets WHERE id=NEW.market_id AND synthetic='yes') THEN
     RAISE EXCEPTION 'Synthetic browsing market is not tradable';
   END IF;
   RETURN NEW;

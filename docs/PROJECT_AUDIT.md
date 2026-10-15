@@ -8,8 +8,8 @@ This report preserves the original audit of revision `deba183`; the findings bel
 
 | Finding | Remediation PR |
 | --- | --- |
-| A1 administrator keys; A4 readiness | #5 — preserve configuration during setup and validate current schema/configuration; also reject missing restored password hashes |
-| A2 availability; A5 event coverage; A6 consistent account snapshot | #6 — enforce synthetic restrictions, display real depth, record lifecycle/private invalidations, use repeatable-read balance/history snapshots |
+| A1 administrator keys; A4 readiness | #5 — preserve configuration during setup and validate current schema/configuration; also reject missing restored password hashes and missing or disabled application triggers |
+| A2 availability; A5 event coverage; A6 consistent account snapshot | #6 — enforce synthetic restrictions while preserving legacy complete-set redemption, display real depth, record lifecycle/private invalidations, use repeatable-read balance/history snapshots |
 | A3 resolution/payouts | Settlement PR stacked on #6 — immutable sole-admin YES/NO/invalid evidence, fixed invalid refunds, guarded resumable collateral payouts and private receipts |
 
 Participant trading controls, live delivery and offline requests remain outside this batch. Local verification uses disposable synthetic databases; browser/proxy/recovery verification remains separate. CodeRabbit's skipped status is not review approval; manual reviews and CI are monitored for the linked PRs.

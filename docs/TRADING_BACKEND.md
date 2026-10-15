@@ -13,7 +13,7 @@ This milestone adds PostgreSQL-backed trading APIs. Direct sole-oracle resolutio
 - GTC rests until cancellation or market closure. GTD requires a future explicit UTC expiry at or before the market deadline. IOC executes within its limit and cancels any remainder. Unbounded market orders are unavailable.
 - A paused market keeps its resting reservations and rejects new orders, minting and burning. Owners can cancel during a pause. Permanent closure and account suspension cancel affected orders and release reservations atomically. Minting and burning also stop at the market deadline; final payouts run through the maintenance worker.
 - There are at most 100 open orders per owner across markets and 200 per market. New orders beyond those limits are rejected. Book depth is bounded by the market limit. The matching transaction examines at most 200 resting orders.
-- Seeded synthetic browsing examples do not accept mint/burn/place operations. Owners can still cancel legacy orders; maintenance also cancels them.
+- Seeded synthetic browsing examples reject minting and order placement. Owners can still cancel legacy orders; maintenance also cancels them. Burning available legacy YES/NO pairs remains possible while open and unpaused, returning existing collateral without adding supply or allowing new trades.
 - Participants cannot generate credits. Trade proceeds and burns move already-backed credits. Only the administrator can issue credits through the existing credit controls.
 
 ## APIs
