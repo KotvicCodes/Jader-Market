@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { sql, TransactionRollbackError } from "drizzle-orm";
 import { createDatabase, getDatabase } from "../../src/db/client";
 import { assertDatabaseReady } from "../../src/db/readiness";
 import { GET } from "../../src/app/api/ready/route";
@@ -60,6 +61,38 @@ describe("application readiness", () => {
     } finally {
       await connection.client.unsafe("ALTER TABLE users ADD COLUMN password_hash text NOT NULL");
     }
+  });
+  it.each(["drop", "disable", "replica"] as const)("rejects every required application trigger when its restore state is %s", async state => {
+    const triggers = await connection.db.execute<{ table_name: string; trigger_name: string }>(sql`
+      SELECT c.relname AS table_name, t.tgname AS trigger_name
+      FROM pg_catalog.pg_trigger t
+      JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND NOT t.tgisinternal`);
+    expect(triggers.length).toBeGreaterThan(0);
+    for (const trigger of triggers) {
+      await expect(connection.db.transaction(async tx => {
+        const table = sql`${sql.identifier("public")}.${sql.identifier(trigger.table_name)}`;
+        const name = sql.identifier(trigger.trigger_name);
+        if (state === "drop") await tx.execute(sql`DROP TRIGGER ${name} ON ${table}`);
+        else if (state === "disable") await tx.execute(sql`ALTER TABLE ${table} DISABLE TRIGGER ${name}`);
+        else await tx.execute(sql`ALTER TABLE ${table} ENABLE REPLICA TRIGGER ${name}`);
+        await expect(assertDatabaseReady(tx), `${trigger.table_name}.${trigger.trigger_name}`).rejects.toThrow("database_not_ready");
+        tx.rollback();
+      })).rejects.toBeInstanceOf(TransactionRollbackError);
+    }
+    expect((await GET()).status).toBe(200);
+  });
+  it("reports unavailable until the ledger application trigger is restored", async () => {
+    await connection.client.unsafe("ALTER TABLE ledger_entries DISABLE TRIGGER ledger_apply");
+    try {
+      const response = await GET();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ status: "unavailable", code: "APPLICATION_NOT_READY" });
+    } finally {
+      await connection.client.unsafe("ALTER TABLE ledger_entries ENABLE TRIGGER ledger_apply");
+    }
+    expect((await GET()).status).toBe(200);
   });
   it("rejects an incomplete restore even if migration markers remain", async () => {
     await connection.client.unsafe("ALTER TABLE sessions DROP COLUMN pending_mfa");
