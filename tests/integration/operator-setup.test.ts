@@ -2,6 +2,7 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { parse } from "dotenv";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase } from "../../src/db/client";
@@ -118,6 +119,19 @@ async function freshSetup(check: (db: ReturnType<typeof createDatabase>, dbUrl: 
 }
 
 describe("administrator configuration failure and concurrency", () => {
+  it("saves a reloadable generated key when empty AUTH_SECRET assignments are duplicated", async () => {
+    await freshSetup(async (db, dbUrl, path) => {
+      await migrate(db.db, { migrationsFolder: "drizzle" });
+      writeFileSync(join(path, ".env"), "SYNTHETIC_SENTINEL=unchanged\nAUTH_SECRET=\nAUTH_SECRET=\n");
+      const result = await runAdministrator(path, ["operator_admin\n", `${password}\n`, `${password}\n`], { databaseUrl: dbUrl });
+      expect(result.code).toBe(0);
+      const saved = parse(readFileSync(join(path, ".env")));
+      expect(saved.AUTH_SECRET).toMatch(/^[a-f0-9]{64}$/);
+      expect(saved.SYNTHETIC_SENTINEL).toBe("unchanged");
+      const recovered = await runAdministrator(path, ["operator_admin\n", `${replacement}\n`, `${replacement}\n`], { recover: true, databaseUrl: dbUrl, secret: saved.AUTH_SECRET });
+      expect(recovered.code).toBe(0);
+    });
+  });
   it("leaves configuration unchanged when migrations are missing", async () => {
     await freshSetup(async (_db, dbUrl, path) => {
       const previous = "SYNTHETIC_SENTINEL=unchanged\nAUTH_SECRET=\n";
