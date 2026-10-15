@@ -91,7 +91,8 @@ export async function mutateTrading(token: string, action: TradingAction, input:
     }
     const [market] = await tx.select().from(markets).where(eq(markets.id, ctx.marketId)).for("update");
     if (!market || market.status === "draft") throw new MemberError("market_missing", 404);
-    if (parsed.action !== "cancel" && market.synthetic === "yes") throw new MemberError("trading_unavailable", 409);
+    // Supply-reducing redemption must remain available for pre-upgrade pairs.
+    if ((parsed.action === "mint" || parsed.action === "place") && market.synthetic === "yes") throw new MemberError("trading_unavailable", 409);
     if (parsed.action !== "cancel" && effectiveMarketStatus(market) !== "open") throw new MemberError("trading_closed", 409);
     // Complete-set operations must only contain their own mint/burn movements.
     if (parsed.action === "place" || parsed.action === "cancel") await cleanMarket(tx, ctx);

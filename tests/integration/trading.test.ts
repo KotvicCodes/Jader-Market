@@ -75,7 +75,8 @@ describe("collateral-backed trading", () => {
   it("rejects persistent trading in synthetic browsing examples", async () => {
     const id = await market({ synthetic: "yes" });
     const before = await snapshot(alice, id);
-    for (const action of ["mint", "burn", "place"] as const) await expect(act(alice, action, id)).rejects.toMatchObject({ code: "trading_unavailable" });
+    for (const action of ["mint", "place"] as const) await expect(act(alice, action, id)).rejects.toMatchObject({ code: "trading_unavailable" });
+    await expect(act(alice, "burn", id)).rejects.toMatchObject({ code: "insufficient_shares" });
     expect((await snapshot(alice, id)).availableCredits).toBe(before.availableCredits);
     expect((await publicTradingSnapshot(id)).executable).toBe(false);
     expect((await publicTradingSnapshot(id)).book).toEqual([]);
