@@ -29,4 +29,13 @@ describe("portable operator commands", () => {
     expect(result.stderr).toContain("Native transpiler blocked by portability test.");
     expect(result.stderr).not.toContain("Administrator setup unavailable");
   });
+
+  it("loads reconciliation without a native transpiler and fails closed without database configuration", () => {
+    const [, ...args] = scripts.reconcile.split(" ");
+    const result = spawnSync(process.execPath,args,{ env: environment,encoding: "utf8",timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(3);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.trim()).toMatch(/^Reconciliation unavailable:[^\n]*$/);
+  });
 });

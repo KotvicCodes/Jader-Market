@@ -2,7 +2,7 @@
 
 A prediction market prototype inspired by Polymarket for a small closed community. The administrator is the sole oracle. Payments are settled offline and recorded in a private internal ledger.
 
-**Status:** accounts, credits, market administration, and participant trading prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. Authenticated market pages provide reviewed mint/burn, buy/sell limit orders, partial-fill feedback, holdings, open-order cancellation and recent fills. The private portfolio shows cross-market holdings, all open orders with cancellation, paginated fills and credit/share history, and payout receipts. Active market and portfolio tabs poll authoritative snapshots with visible freshness, reconnect checks and bounded retry delays. Direct oracle resolution and collateral-funded payouts are implemented.
+**Status:** accounts, credits, market administration, and participant trading prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. Authenticated market pages provide reviewed mint/burn, buy/sell limit orders, partial-fill feedback, holdings, open-order cancellation and recent fills. The private portfolio shows cross-market holdings, all open orders with cancellation, paginated fills and credit/share history, and payout receipts. Active market and portfolio tabs poll authoritative snapshots with visible freshness, reconnect checks and bounded retry delays. Direct oracle resolution and collateral-funded payouts are implemented. A trusted-host reconciliation command checks internal accounting and independently verified external payment records.
 
 ## Accounts and credits
 
@@ -16,7 +16,7 @@ npm run dev
 
 `admin:create` runs in an interactive terminal. Choose a handle and a password of 12 to 128 characters; passwords are hidden and never passed as command arguments. It validates the handle and matching passwords, checks the current schema and existing administrator, and serializes operator setup before generating a private `AUTH_SECRET` in `.env` if needed. Failed setup restores any generated configuration. An empty exported `AUTH_SECRET` must be removed before using a saved `.env` key; setup never replaces a masked saved key. It then creates the sole administrator with zero credits. There are no default sign-in credentials. Restart the app after initial setup so it loads the generated key.
 
-Administrator setup/recovery, migrations, seeding, and the worker use the existing JavaScript TypeScript compiler, without loading tsx or esbuild. Use the pinned Node.js 22.22.1 version. This lets those commands start even when a shared checkout contains dependencies installed on another operating system. Development, builds, and test tooling still need dependencies installed for their host: if esbuild or another native dependency reports a Linux/macOS mismatch, stop the app and run `npm ci` on that host. Avoid sharing `node_modules` between Linux and macOS checkouts. Neither reinstalling dependencies nor these script changes remove `.env` or database data.
+Administrator setup/recovery, migrations, seeding, reconciliation, and the worker use the existing JavaScript TypeScript compiler, without loading tsx or esbuild. Use the pinned Node.js 22.22.1 version. This lets those commands start even when a shared checkout contains dependencies installed on another operating system. Development, builds, and test tooling still need dependencies installed for their host: if esbuild or another native dependency reports a Linux/macOS mismatch, stop the app and run `npm ci` on that host. Avoid sharing `node_modules` between Linux and macOS checkouts. Neither reinstalling dependencies nor these script changes remove `.env` or database data.
 
 1. Open `/account`, sign in, and enable your authenticator using the private setup key and a six-digit code. The authenticator uses standard time-based codes (SHA-1, six digits, 30 seconds).
 2. Open `/admin` and create a participant. New accounts always start with zero credits. Give the initial password to that participant privately; they can change it on `/account`.
@@ -58,6 +58,12 @@ The browser saves the exact pending operation in session storage before submissi
 ## Review your portfolio
 
 Open `/portfolio` after signing in. Available credits and separate order/withdrawal reservations accompany holdings across markets, all open orders with reviewed cancellation, fills, complete credit/share movement history and payout receipts. Use each section's **Older** and **Latest** links independently; history pagination never hides an open order's cancellation control. Active tabs update automatically without changing the selected history cursors; **Refresh portfolio** is also available. All sections come from one consistent database snapshot; share quantities do not imply a valuation or profit. See [Participant portfolio](docs/PARTICIPANT_PORTFOLIO.md) for history semantics, cancellation recovery and a rehearsal.
+
+## Reconcile accounting and offline payments
+
+Run `npm run reconcile` on the trusted host for a read-only, consistent-snapshot JSON report. Internal checks cover ledger/holding projections, collateral, order/withdrawal reservations, fills and payouts. Without external evidence, a clean report exits 2 and marks payments unchecked. Supply `npm run reconcile -- --external-register /private/market-receipts.json` to compare a complete independently verified receipt register with recorded incoming/outgoing transfers. A full pass exits 0; discrepancies exit 1; unavailable/invalid runs exit 3. Use `npm run --silent reconcile` when redirecting machine-readable JSON.
+
+See [Operator reconciliation](docs/OPERATOR_RECONCILIATION.md) for the register format, payment checks and incident response. Run it after every pilot session and around payment batches; stop payments and new credit issuance on discrepancies. Reports and receipt registers are private. The command performs no repairs or transfers, and does not satisfy the remaining production deployment, recovery or acceptance gates.
 
 ## Try the demo
 
@@ -101,7 +107,7 @@ npm run test:http
 
 Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, market lifecycle and HTTP checks create and drop disposable databases, so the test role needs CREATEDB permission. Other integration suites retain synthetic fixtures in the dedicated test database. HTTP migrations and synthetic account records never modify the configured control database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/trading/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
-For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs and reviewed participant controls; operational reconciliation and browser acceptance remain outstanding. Direct oracle resolution and collateral-funded payouts are implemented.
+For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs and reviewed participant controls, and operator reconciliation is implemented. Production deployment/recovery and browser/load acceptance remain outstanding. Direct oracle resolution and collateral-funded payouts are implemented.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
 
@@ -114,8 +120,8 @@ Development dependency overrides replace the Next.js lint plugin's glob dependen
 
 ## Next steps
 
-1. Implement operator reconciliation (readiness item 5).
-2. Prove deployment, backups and recovery.
-3. Complete desktop/mobile/keyboard and pilot-load acceptance before real-money operation.
+1. Merge and rehearse the feature stack in staging, including [operator reconciliation](docs/OPERATOR_RECONCILIATION.md) (readiness item 5).
+2. Prove deployment, backups and recovery (items 6–7).
+3. Complete desktop/mobile/keyboard and pilot-load acceptance before real-money operation (item 8).
 
 Use synthetic data during development. Community trading tests should use explicitly created test markets; the seeded browsing examples are not tradable. Never commit credentials, real account information, payment records, exports, or agent instructions.

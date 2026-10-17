@@ -1,6 +1,6 @@
 # Participant trading controls
 
-Published market pages now use the existing authenticated trading API for complete-set mint/burn, limit orders and cancellation. This implements readiness checklist item 2. The cross-market portfolio implements item 3; see [Participant portfolio](PARTICIPANT_PORTFOLIO.md). Bounded automatic refresh and reconnect handling implement item 4; see [Automatic refresh](AUTOMATIC_REFRESH.md). Operational reconciliation and production/browser acceptance remain launch gates.
+Published market pages now use the existing authenticated trading API for complete-set mint/burn, limit orders and cancellation. This implements readiness checklist item 2. The cross-market portfolio implements item 3; see [Participant portfolio](PARTICIPANT_PORTFOLIO.md). Bounded automatic refresh and reconnect handling implement item 4; see [Automatic refresh](AUTOMATIC_REFRESH.md). [Operator reconciliation](OPERATOR_RECONCILIATION.md) implements item 5; production deployment/recovery and browser/load acceptance remain launch gates.
 
 ## Two-participant rehearsal
 
