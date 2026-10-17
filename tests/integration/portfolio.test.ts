@@ -6,6 +6,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, getDatabase } from "../../src/db/client";
 import { adjustCredits } from "../../src/db/members";
 import { portfolioSnapshot } from "../../src/db/portfolio";
+import { marketSnapshot } from "../../src/db/market-snapshot";
 import { mutateMarket } from "../../src/db/market-admin";
 import { mutateTrading } from "../../src/db/trading";
 import { mutateWithdrawal } from "../../src/db/withdrawals";
@@ -183,5 +184,29 @@ describe("complete private portfolio", () => {
     await expect(portfolioSnapshot(bob, { fillsBefore: "9223372036854775808" })).rejects.toMatchObject({ code: "invalid_request" });
     await connection.db.delete(sessions).where(eq(sessions.tokenHash, digest(stranger)));
     await expect(portfolioSnapshot(stranger)).rejects.toMatchObject({ code: "unauthenticated" });
+  });
+
+  it("refreshes public depth, private trading and resolution together without exposing another owner", async () => {
+    const id = await market();
+    await act(alice, "mint", id, { quantity: "3" });
+    await act(alice, "place", id, { quantity: "3" });
+    await act(bob, "place", id, { side: "buy", quantity: "1", timeInForce: "IOC" });
+    const member = { token: alice, csrf: "synthetic-csrf", user: { id: ids.get(alice)! } };
+    const current = await marketSnapshot(id, member);
+    expect(current.trading.book).toMatchObject([{ quantity: "2" }]);
+    expect(current.account?.portfolio.openOrders).toMatchObject([{ remaining: "2" }]);
+    expect(current.account?.portfolio.holdings.find(h => h.outcome === "YES")?.reserved).toBe("2");
+    expect(JSON.stringify(current)).not.toContain(ids.get(bob));
+    const anonymous = await marketSnapshot(id);
+    expect(anonymous.account).toBeNull();
+    expect(JSON.stringify(anonymous)).not.toContain(member.user.id);
+    await mutateMarket(admin, "close", { id, revision: 0, operationKey: randomUUID(), confirmed: true });
+    await mutateMarket(admin, "resolve", { id, revision: 1, operationKey: randomUUID(), result: "YES", evidence: "Synthetic evidence confirms the fictional YES result.", confirmed: true });
+    await settleMarkets();
+    const settled = await marketSnapshot(id, member);
+    expect(settled.trading.status).toBe("resolved");
+    expect(settled.resolution?.result).toBe("YES");
+    expect(settled.account?.portfolio.openOrders).toEqual([]);
+    expect(settled.account?.portfolio.holdings.every(h => h.available === "0" && h.reserved === "0")).toBe(true);
   });
 });

@@ -43,14 +43,15 @@ export function pendingTradingStore(ownerId: string, marketId: string) {
     }
     return cached;
   }
-  function notify() { for (const listener of listeners) listener(); }
+  function notify() { for (const listener of listeners) listener(); window.dispatchEvent(new Event("jader:pending-trade")); }
   return {
     getSnapshot,
     getServerSnapshot: () => serverState,
     subscribe(listener: () => void) {
       listeners.add(listener);
       window.addEventListener("storage", listener);
-      return () => { listeners.delete(listener); window.removeEventListener("storage", listener); };
+      window.addEventListener("jader:pending-trade", listener);
+      return () => { listeners.delete(listener); window.removeEventListener("storage", listener); window.removeEventListener("jader:pending-trade", listener); };
     },
     clear(request: TradingRequest) {
       // A late replay response must never erase a newer pending request.
@@ -64,6 +65,29 @@ export function pendingTradingStore(ownerId: string, marketId: string) {
       if (request) window.sessionStorage.setItem(key, JSON.stringify(request));
       else window.sessionStorage.removeItem(key);
       notify();
+    },
+  };
+}
+
+// A portfolio refresh can remove the last open order in a market while its
+// cancellation response is still uncertain. Discover saved requests independently.
+export function pendingTradingMarkets(ownerId: string) {
+  const prefix = `jader:pending-trade:${ownerId}:`;
+  return {
+    getSnapshot() {
+      try {
+        const markets: string[] = [];
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const key = window.sessionStorage.key(i);
+          if (key?.startsWith(prefix) && uuid.test(key.slice(prefix.length))) markets.push(key.slice(prefix.length));
+        }
+        return JSON.stringify(markets.sort());
+      } catch { return "unavailable"; }
+    },
+    getServerSnapshot: () => "[]",
+    subscribe(listener: () => void) {
+      window.addEventListener("storage", listener); window.addEventListener("jader:pending-trade", listener);
+      return () => { window.removeEventListener("storage", listener); window.removeEventListener("jader:pending-trade", listener); };
     },
   };
 }

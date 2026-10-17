@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PortfolioOrders, PortfolioRefresh } from "../../src/components/portfolio-orders";
+import { PortfolioOrders } from "../../src/components/portfolio-orders";
 import type { portfolioSnapshot } from "../../src/db/portfolio";
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
@@ -14,7 +14,7 @@ type Orders = Awaited<ReturnType<typeof portfolioSnapshot>>["openOrders"];
 let container: HTMLDivElement, root: Root;
 let orders: Orders;
 let fetchMock: ReturnType<typeof vi.fn>;
-async function render() { await act(async () => root.render(<><PortfolioRefresh /><PortfolioOrders ownerId={ownerId} csrf="synthetic-csrf" orders={orders} /></>)); }
+async function render() { await act(async () => root.render(<PortfolioOrders ownerId={ownerId} csrf="synthetic-csrf" orders={orders} />)); }
 function button(text: string) {
   const node = Array.from(container.querySelectorAll("button")).find(b => b.textContent === text);
   if (!node) throw new Error(`Missing button: ${text}`);
@@ -74,9 +74,6 @@ describe("portfolio order management", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/trading/mint");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(pending.body);
     expect(sessionStorage.getItem(storageKey)).toBeNull();
-  });
-  it("refreshes all portfolio sections on explicit request", async () => {
-    await render(); await click("Refresh portfolio"); expect(refresh).toHaveBeenCalledOnce(); expect(fetchMock).not.toHaveBeenCalled();
   });
   it("does not erase a newer request when an earlier cancellation response arrives late", async () => {
     let resolve!: (value: Response) => void;
