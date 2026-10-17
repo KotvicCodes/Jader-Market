@@ -22,7 +22,7 @@ async function holding(tx: Transaction, ownerId: string, marketId: string, outco
   return record;
 }
 
-async function transfer(tx: Transaction, ctx: Context, kind: string, recipientId: string, src: string, dst: string, amount: bigint, id = randomUUID()) {
+export async function transfer(tx: Transaction, ctx: Context, kind: string, recipientId: string, src: string, dst: string, amount: bigint, id = randomUUID()) {
   if (amount === 0n) return id;
   const accounts = await tx.select().from(ledgerAccounts).where(inArray(ledgerAccounts.id, [src, dst])).orderBy(asc(ledgerAccounts.id)).for("update");
   if (accounts.length !== 2) throw new MemberError("configuration", 503);
@@ -32,7 +32,7 @@ async function transfer(tx: Transaction, ctx: Context, kind: string, recipientId
   return id;
 }
 
-async function move(tx: Transaction, ctx: Context, holdingId: string, kind: string, availableDelta: bigint, reservedDelta: bigint, groupId = randomUUID()) {
+export async function move(tx: Transaction, ctx: Context, holdingId: string, kind: string, availableDelta: bigint, reservedDelta: bigint, groupId = randomUUID()) {
   await tx.insert(shareMovements).values({ operationId: ctx.id, holdingId, kind, availableDelta, reservedDelta, groupId });
 }
 
@@ -59,7 +59,7 @@ async function releaseOrder(tx: Transaction, ctx: Context, order: Order, status:
   await event(tx, ctx, "portfolio.changed", order.ownerId);
 }
 
-async function finishOperation(tx: Transaction, ctx: Context, action: string, requestHash: string, response: Record<string, unknown>) {
+export async function finishOperation(tx: Transaction, ctx: Context, action: string, requestHash: string, response: Record<string, unknown>) {
   await event(tx, ctx, "market.changed", null);
   await tx.insert(tradingOperations).values({ ...ctx, action, requestHash, response });
 }

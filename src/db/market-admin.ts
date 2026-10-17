@@ -1,9 +1,9 @@
 import { cancelTradingOrders } from "./trading";
 import { and, count, desc, eq, ilike, sql } from "drizzle-orm";
 import { digest, MemberError } from "../domain/identity";
-import { marketRevision, marketUuid, parseMarketTerms, type MarketAction } from "../domain/market-admin";
+import { marketRevision, marketUuid, parseMarketTerms, parseResolution, type MarketAction } from "../domain/market-admin";
 import { memberDatabase, readSession, requireAdministrator } from "./members";
-import { marketAudit, markets } from "./schema";
+import { marketAudit, marketResolutions, markets } from "./schema";
 import { recordMarketChange } from "./events";
 
 export async function mutateMarket(token: string, action: MarketAction, input: Record<string, unknown>) {
@@ -11,12 +11,13 @@ export async function mutateMarket(token: string, action: MarketAction, input: R
   const id = action === "create" ? operationKey : marketUuid(input.id);
   const revision = action === "create" ? 0 : marketRevision(input.revision);
   const terms = action === "create" || action === "edit" ? parseMarketTerms(input) : undefined;
+  const resolution = action === "resolve" ? parseResolution(input) : undefined;
   if (!terms && input.confirmed !== true) throw new MemberError("invalid_request");
   return memberDatabase().db.transaction(async tx => {
     const actor = await readSession(token, tx, true);
     requireAdministrator(actor);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${operationKey}, 0))`);
-    const requestHash = digest(JSON.stringify([actor.user.id, action, id, revision, terms]));
+    const requestHash = digest(JSON.stringify(resolution ? [actor.user.id, action, id, revision, terms, resolution] : [actor.user.id, action, id, revision, terms]));
     const [prior] = await tx.select().from(marketAudit).where(eq(marketAudit.operationKey, operationKey));
     if (prior) {
       if (prior.requestHash !== requestHash) throw new MemberError("market_operation_conflict", 409);
@@ -42,6 +43,10 @@ export async function mutateMarket(token: string, action: MarketAction, input: R
         parseMarketTerms({ ...market, closesAt: market.closesAt.toISOString().replace(".000Z", "Z") });
         if (market.closesAt <= now) throw new MemberError("invalid_market_deadline");
         changes = { status: "open", publishedAt: now };
+      } else if (action === "resolve") {
+        if (market.status !== "closed") throw new MemberError("market_transition", 409);
+        await tx.insert(marketResolutions).values({ id: operationKey, marketId: id, actorId: actor.user.id, requestHash, ...resolution! });
+        changes = { status: "settling", paused: false };
       } else {
         if (market.status !== "open") throw new MemberError("market_transition", 409);
         if (action === "close") changes = { status: "closed", paused: false };

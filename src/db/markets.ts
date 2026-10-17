@@ -3,7 +3,7 @@ import { parseMarketQuery } from "../domain/market-query";
 import { getDatabase } from "./client";
 import { markets } from "./schema";
 
-const publicStatuses = ["open", "closed", "proposed", "resolved", "void", "cancelled"] as const;
+const publicStatuses = ["open", "closed", "settling", "proposed", "resolved", "void", "cancelled"] as const;
 // Keep administration revisions and future private fields out of public reads.
 const publicFields = { id: markets.id, slug: markets.slug, question: markets.question, description: markets.description, category: markets.category, resolutionRules: markets.resolutionRules, resolutionSource: markets.resolutionSource, status: markets.status, closesAt: markets.closesAt, publishedAt: markets.publishedAt, synthetic: markets.synthetic, paused: markets.paused };
 

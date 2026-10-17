@@ -6,7 +6,7 @@ export const requiredDatabaseTriggers: Record<string, readonly string[]> = {
   admin_audit: ["admin_audit_immutable"],
   ledger_accounts: ["account_projection", "account_identity", "trading_account_projection"],
   market_audit: ["market_audit_immutable"],
-  markets: ["market_terms_guard", "market_order_lifecycle"],
+  markets: ["market_terms_guard", "market_order_lifecycle", "settlement_lifecycle_guard"],
   trading_operations: ["trading_operations_immutable", "trading_operation_guard", "synthetic_trading_guard"],
   fills: ["fills_immutable", "fill_guard"],
   share_movements: ["movements_immutable", "movement_apply", "movement_guard"],
@@ -15,4 +15,6 @@ export const requiredDatabaseTriggers: Record<string, readonly string[]> = {
   holdings: ["holding_identity", "holding_projection"],
   users: ["suspended_order_lifecycle"],
   market_deadline_events: ["deadline_events_immutable", "deadline_event_guard"],
+  market_resolutions: ["resolutions_immutable", "resolution_guard"],
+  market_payouts: ["payouts_immutable", "payout_guard"],
 };

@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   expire: vi.fn<() => Promise<number>>(),
+  settle: vi.fn<() => Promise<number>>(),
   end: vi.fn<() => Promise<void>>(),
   delay: vi.fn<() => Promise<void>>(),
 }));
 vi.mock("../../src/db/client", () => ({ getDatabase: () => ({ client: { end: mocks.end } }) }));
 vi.mock("../../src/db/trading", () => ({ expireTradingOrders: mocks.expire }));
+vi.mock("../../src/db/settlement", () => ({ settleMarkets: mocks.settle }));
 vi.mock("node:timers/promises", () => ({ setTimeout: mocks.delay }));
 
 const originalArguments = [...process.argv];
@@ -29,6 +31,7 @@ beforeEach(() => {
   });
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.settle.mockResolvedValue(0);
   mocks.end.mockResolvedValue();
   mocks.delay.mockResolvedValue();
 });
@@ -60,6 +63,16 @@ describe("trading maintenance worker", () => {
     expect(console.error).toHaveBeenCalledExactlyOnceWith("Worker unavailable: trading maintenance failed.");
     expect(console.info).not.toHaveBeenCalled();
     expect(mocks.end).toHaveBeenCalledTimes(1);
+  });
+  it("retries settlement failure on a later pass without exposing raw errors", async () => {
+    mocks.expire.mockResolvedValue(0);
+    mocks.settle.mockRejectedValueOnce(new Error("synthetic-private-error"));
+    mocks.settle.mockImplementationOnce(async () => { stop.get("SIGINT")!(); return 1; });
+    await import("../../scripts/worker");
+    expect(mocks.settle).toHaveBeenCalledTimes(2);
+    expect(mocks.end).toHaveBeenCalledTimes(1);
+    expect(process.exitCode).toBeUndefined();
+    expect(console.error).toHaveBeenCalledExactlyOnceWith("Trading maintenance pass failed; retrying.");
   });
   it("completes one successful --once pass without waiting", async () => {
     process.argv.push("--once");

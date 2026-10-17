@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, check, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
-export const marketStatus = pgEnum("market_status", ["draft", "open", "closed", "proposed", "resolved", "void", "cancelled"]);
+export const marketStatus = pgEnum("market_status", ["draft", "open", "closed", "settling", "proposed", "resolved", "void", "cancelled"]);
 
 export const markets = pgTable("markets", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -87,7 +87,7 @@ export const journals = pgTable("journals", {
 }, table => [
   index("journal_recipient_index").on(table.recipientId, table.createdAt),
   index("journal_trading_operation_index").on(table.tradingOperationId),
-  check("journal_kind_valid", sql`${table.kind} IN ('credit', 'debit', 'mint', 'burn', 'reserve', 'release', 'trade')`),
+  check("journal_kind_valid", sql`${table.kind} IN ('credit', 'debit', 'mint', 'burn', 'reserve', 'release', 'trade', 'payout')`),
   check("journal_reason_valid", sql`${table.reason} IN ('demo_grant', 'offline_credit', 'offline_debit', 'correction', 'trading')`),
   check("journal_amount_valid", sql`${table.amount} BETWEEN 1 AND 10000000000`),
 ]);
@@ -122,7 +122,7 @@ export const marketAudit = pgTable("market_audit", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   index("market_audit_history_index").on(table.marketId, table.createdAt),
-  check("market_audit_action_valid", sql`${table.action} IN ('create', 'edit', 'publish', 'pause', 'resume', 'close')`),
+  check("market_audit_action_valid", sql`${table.action} IN ('create', 'edit', 'publish', 'pause', 'resume', 'close', 'resolve')`),
 ]);
 
 
@@ -135,7 +135,7 @@ export const tradingOperations = pgTable("trading_operations", {
   response: jsonb("response").$type<Record<string, unknown>>().notNull(),
   transactionId: bigint("transaction_id", { mode: "bigint" }).notNull().default(sql`txid_current()`),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [check("trading_action_valid", sql`${table.action} IN ('mint', 'burn', 'place', 'cancel', 'maintenance')`)]);
+}, table => [check("trading_action_valid", sql`${table.action} IN ('mint', 'burn', 'place', 'cancel', 'maintenance', 'settle')`)]);
 
 export const holdings = pgTable("holdings", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -204,7 +204,7 @@ export const shareMovements = pgTable("share_movements", {
   index("movement_operation_index").on(table.operationId),
   index("movement_group_index").on(table.groupId),
   uniqueIndex("movement_group_holding_unique").on(table.groupId, table.holdingId),
-  check("movement_valid", sql`${table.kind} IN ('mint', 'burn', 'reserve', 'release', 'trade') AND (${table.availableDelta} <> 0 OR ${table.reservedDelta} <> 0)`),
+  check("movement_valid", sql`${table.kind} IN ('mint', 'burn', 'reserve', 'release', 'trade', 'payout') AND (${table.availableDelta} <> 0 OR ${table.reservedDelta} <> 0)`),
 ]);
 
 export const tradingOutbox = pgTable("trading_outbox", {
@@ -226,3 +226,32 @@ export const marketDeadlineEvents = pgTable("market_deadline_events", {
   operationId: uuid("operation_id").notNull().references(() => tradingOperations.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Resolution evidence and payout receipts are append-only and verified at commit.
+export const marketResolutions = pgTable("market_resolutions", {
+  id: uuid("id").primaryKey(),
+  marketId: uuid("market_id").notNull().unique().references(() => markets.id),
+  actorId: uuid("actor_id").notNull().references(() => users.id),
+  result: text("result").$type<"YES" | "NO" | "invalid">().notNull(),
+  evidence: text("evidence").notNull(),
+  requestHash: text("request_hash").notNull(),
+  transactionId: bigint("transaction_id", { mode: "bigint" }).notNull().default(sql`txid_current()`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [check("resolution_valid", sql`${table.result} IN ('YES', 'NO', 'invalid') AND length(trim(${table.evidence})) BETWEEN 20 AND 2000`)]);
+
+export const marketPayouts = pgTable("market_payouts", {
+  id: uuid("id").primaryKey(),
+  resolutionId: uuid("resolution_id").notNull().references(() => marketResolutions.id),
+  holdingId: uuid("holding_id").notNull().references(() => holdings.id),
+  ownerId: uuid("owner_id").notNull().references(() => users.id),
+  quantity: bigint("quantity", { mode: "bigint" }).notNull(),
+  amount: bigint("amount", { mode: "bigint" }).notNull(),
+  journalId: uuid("journal_id").unique().references(() => journals.id),
+  sequence: bigint("sequence", { mode: "bigint" }).generatedAlwaysAsIdentity(),
+  transactionId: bigint("transaction_id", { mode: "bigint" }).notNull().default(sql`txid_current()`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("payout_owner_sequence_index").on(table.ownerId, table.sequence),
+  index("payout_resolution_index").on(table.resolutionId),
+  check("payout_valid", sql`${table.quantity} BETWEEN 1 AND 1000000 AND ${table.amount} BETWEEN 0 AND 10000000000 AND ((${table.amount} = 0) = (${table.journalId} IS NULL))`),
+]);

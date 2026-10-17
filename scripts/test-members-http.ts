@@ -10,6 +10,7 @@ import { createDatabase } from "../src/db/client";
 import { ledgerAccounts, markets, sessions, users } from "../src/db/schema";
 import { digest, hashPassword, totp } from "../src/domain/identity";
 import { version } from "../package.json";
+import { spawnSync } from "node:child_process";
 import { syntheticMarkets } from "../src/db/fixtures";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -226,6 +227,42 @@ try {
   check((await connection.db.select().from(markets).where(eq(markets.id, marketId)))[0].status === "closed");
   const closedPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
   check(closedPortfolio.orders[0].status === "cancelled" && closedPortfolio.holdings.find((h: { outcome: string }) => h.outcome === "YES").reserved === "0");
+
+  stage = "immutable resolution, collateral payouts, and private receipts";
+  const resolution = { id: marketId, revision: "5", operationKey: randomUUID(), result: "YES", evidence: "Synthetic public evidence confirms the published YES outcome.", confirmed: true };
+  check((await request("/api/admin/markets/resolve", new Map(), resolution)).status === 401);
+  check((await request("/api/admin/markets/resolve", participantCookies, resolution)).status === 403);
+  check((await request("/api/admin/markets/resolve", adminCookies, resolution, { csrf: "invalid" })).status === 403);
+  check((await request("/api/admin/markets/resolve", adminCookies, resolution, { origin: "https://example.invalid" })).status === 403);
+  check((await request("/api/admin/markets/resolve", adminCookies, { ...resolution, evidence: "short" })).status === 400);
+  check((await request("/api/admin/markets/resolve", adminCookies, { ...resolution, revision: "4" })).status === 409);
+  check((await request("/api/admin/markets/resolve", adminCookies, resolution)).status === 200);
+  check((await request("/api/admin/markets/resolve", adminCookies, resolution)).status === 200);
+  check((await request("/api/admin/markets/resolve", adminCookies, { ...resolution, result: "NO" })).status === 409);
+  const settlingPage = await (await request(`/markets/${slug}`, new Map())).text();
+  check(settlingPage.includes("Final result: ") && settlingPage.includes(resolution.evidence) && settlingPage.includes("Collateral payouts are in progress"));
+  check(!settlingPage.includes(participantId) && !settlingPage.includes(admin.id));
+  const workerEnv = { ...process.env, DATABASE_URL: isolatedUrl.toString(), AUTH_SECRET: secret };
+  for (let pass=0; pass<2; pass++) {
+    const worker = spawnSync(process.execPath, ["scripts/run.mjs", "node", "--import", "./scripts/register-typescript.mjs", "scripts/worker.ts", "--once"], { cwd: process.cwd(), env: workerEnv, encoding: "utf8", timeout: 30000 });
+    check(!worker.error && worker.status === 0);
+  }
+  check((await connection.db.select().from(markets).where(eq(markets.id, marketId)))[0].status === "resolved");
+  check((await request("/api/admin/markets/resolve", adminCookies, resolution)).status === 200);
+  const settledPage = await (await request(`/markets/${slug}`, new Map())).text();
+  check(settledPage.includes("Payouts complete") && settledPage.includes("0.5 credits per YES share"));
+  check((await request("/api/account/payouts", new Map())).status === 401);
+  const receiptsResponse = await request(`/api/account/payouts?ownerId=${admin.id}`, participantCookies);
+  check(receiptsResponse.headers.get("cache-control")?.includes("no-store"));
+  const receipts = (await receiptsResponse.json()).items;
+  check(receipts.length === 2 && receipts.every((p: { result: string }) => p.result === "YES"));
+  check(receipts.reduce((sum: bigint, p: { amount: string }) => sum+BigInt(p.amount), 0n) === 30000n);
+  const adminReceipts = (await (await request("/api/account/payouts", adminCookies)).json()).items;
+  check(adminReceipts.length === 1 && adminReceipts[0].amount === "20000");
+  const receiptPage = await (await request("/portfolio", participantCookies)).text();
+  check(receiptPage.includes("Market payout receipts") && receiptPage.includes(receipts[0].id) && !receiptPage.includes(adminReceipts[0].id));
+  const settledBuyer = (await (await request(`/api/markets/${marketId}/portfolio`, adminCookies)).json());
+  check(settledBuyer.availableCredits === "115000" && settledBuyer.holdings.every((h: { available: string; reserved: string }) => h.available === "0" && h.reserved === "0"));
 
   stage = "client-scoped login isolation";
   for (let i = 0; i < 11; i++) {

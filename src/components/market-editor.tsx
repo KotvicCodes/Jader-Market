@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { payoutPolicy } from "../domain/market-admin";
 import { MemberForm } from "./member-form";
 
 export type EditableMarket = { id: string; revision: number; question: string; description: string; category: string; resolutionRules: string; resolutionSource: string; closesAt: string };
@@ -16,6 +17,7 @@ export function MarketEditor({ csrf, operationKey, market }: { csrf: string; ope
     <label>Description<textarea name="description" defaultValue={market?.description} rows={3} minLength={10} maxLength={600} required /></label>
     <div className="market-fields"><label>Category<select name="category" defaultValue={market?.category ?? "community"}><option value="community">Community</option><option value="technology">Technology</option><option value="science">Science</option></select></label><label>Closing time (UTC)<input name="closesAt" type="datetime-local" step="1" defaultValue={market?.closesAt.slice(0, 19)} required /><span>Use UTC, regardless of your device timezone.</span></label></div>
     <label>Resolution rules<textarea name="resolutionRules" defaultValue={market?.resolutionRules} placeholder="Define precisely when YES wins, when NO wins, and what happens if evidence is unavailable." rows={5} minLength={20} maxLength={1200} required /></label>
+    <p className="notice">{payoutPolicy}</p>
     <label>Resolution source<textarea name="resolutionSource" defaultValue={market?.resolutionSource} placeholder="Name the evidence the administrator will use." rows={2} minLength={5} maxLength={400} required /></label>
   </MemberForm>;
 }

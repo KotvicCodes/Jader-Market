@@ -1,3 +1,4 @@
+import { readPayoutHistory } from "./payout-history";
 import { cancelTradingOrders } from "./trading";
 import { lockTransactions } from "./transaction-lock";
 import { recordCreditChange } from "./events";
@@ -251,7 +252,8 @@ export async function accountSnapshot(token: string, page = 1) {
     requireMember(session);
     const balances = await db.select().from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, session.user.id));
     const history = await db.select({ id: journals.id, kind: journals.kind, reason: journals.reason, amount: journals.amount, createdAt: journals.createdAt }).from(journals).where(and(eq(journals.recipientId, session.user.id), inArray(journals.kind, ["credit", "debit"]))).orderBy(desc(journals.createdAt), desc(journals.id)).limit(21).offset((page - 1) * 20);
-    return { session, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, reserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, history: history.slice(0, 20), hasNext: history.length > 20 };
+    const payouts = await readPayoutHistory(db, session.user.id, page);
+    return { session, payouts, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, reserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, history: history.slice(0, 20), hasNext: history.length > 20 };
   }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 

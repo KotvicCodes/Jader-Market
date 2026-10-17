@@ -2,7 +2,7 @@
 
 A prediction market prototype inspired by Polymarket for a small closed community. The administrator is the sole oracle. Payments are settled offline and recorded in a private internal ledger.
 
-**Status:** accounts, credits, market administration, and trading backend prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. The participant trading interface, live updates, and oracle payouts remain unfinished.
+**Status:** accounts, credits, market administration, and trading backend prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. The participant trading interface and live updates remain unfinished. Direct oracle resolution and collateral-funded payouts are implemented.
 
 ## Accounts and credits
 
@@ -23,7 +23,7 @@ Administrator setup/recovery, migrations, seeding, and the worker use the existi
 3. Select the participant in **Credit adjustment**, enter an amount, choose a reason, check the confirmation, and submit. Only administrators can issue or remove credits. The account selector shows the current page of search results.
 4. In an incognito window, sign in as the participant and open `/portfolio`. Reload or sign out/in to verify that the balance and history persist. Participants cannot access administrator controls or another person's balance.
 
-Use **Demo credit grant** for prototype credits. Offline credit/debit entries are posted only after the administrator independently confirms the transfer. Debits cannot take an account below zero. These are immediate confirmed adjustments; pending offline settlement requests remain a future milestone. Trading APIs reserve existing credits and owned shares. Winning bets will pay from market collateral in the resolution milestone, not mint new credits through a participant endpoint. The `/demo` practice balances remain temporary and separate.
+Use **Demo credit grant** for prototype credits. Offline credit/debit entries are posted only after the administrator independently confirms the transfer. Debits cannot take an account below zero. These are immediate confirmed adjustments; pending offline settlement requests remain a future milestone. Trading APIs reserve existing credits and owned shares. Final payouts transfer existing market collateral to holders; participants cannot mint payout credits. The `/demo` practice balances remain temporary and separate.
 
 Administrator controls require MFA and authentication within the last 10 minutes. Refresh access on `/account` when prompted. Authenticator codes cannot be reused; wait for a fresh code after sign-in or enrollment before reauthenticating. Sessions expire after 24 hours, and sign-out-all, suspension, and password resets revoke sessions. Participant recovery is handled by the administrator. Sole-administrator recovery uses `npm run admin:recover` on the trusted local host; it resets the administrator password and authenticator, revokes sessions, and records an audit event. It requires the existing `AUTH_SECRET`; restore that key from the private backup if it is missing. Recovery does not generate a replacement key. It is never available through a public route.
 
@@ -45,13 +45,13 @@ For an existing checkout with accounts already configured, run `npm run db:migra
 4. In an incognito window, open `/` and verify that the published market appears. It should have been inaccessible before publication.
 5. Use the market's admin page to pause, resume, or permanently close it. Reload the public page to see its current state. Expired markets display as closed on the next page request, even if no background worker has updated their stored status. Expired or closed markets cannot resume.
 
-Each change records a private append-only audit entry. Stale edits are rejected rather than overwriting another saved revision. Retrying the same request is safe; if you lose a response, check the saved state/history before starting a different request. There is no delete or reopen control for published markets. Published non-synthetic open markets accept authenticated trading API operations. Seeded browsing examples reject minting and order placement; the worker cancels any legacy resting orders on those examples. Owners can still burn available legacy YES/NO pairs for their backed credits while the market is open and unpaused. Market voiding, oracle resolution, and payouts remain future milestones. See [the trading backend guide](docs/TRADING_BACKEND.md) for mint/burn, order placement, cancellation, and worker setup.
+Each change records a private append-only audit entry. Stale edits are rejected rather than overwriting another saved revision. Retrying the same request is safe; if you lose a response, check the saved state/history before starting a different request. There is no delete or reopen control for published markets. Published non-synthetic open markets accept authenticated trading API operations. Seeded browsing examples reject minting and order placement; the worker cancels any legacy resting orders on those examples. Owners can still burn available legacy YES/NO pairs for their backed credits while the market is open and unpaused. After explicitly closing a market, record its final YES, NO, or invalid result with public evidence on the admin page. This resolution is immutable. The worker pays winning shares 1 credit each, losing shares zero, or refunds each outcome share 0.5 credits for an invalid result. The fixed policy is shown before publication. Suspended holders retain their entitlements. Keep the worker running until the market changes from settling to resolved or void; private payout receipts appear in the portfolio. See [the trading backend guide](docs/TRADING_BACKEND.md) for mint/burn, order placement, cancellation, and worker setup.
 
 ## Try the demo
 
 Open `http://localhost:3000/demo` after starting the app. This demo works without PostgreSQL or an account and has four fictional markets, sample probability charts, and practice buy/sell controls. Each market starts with 1,000 temporary demo credits. Choose an outcome, enter a whole number of shares, and submit a practice trade to see the balance and positions update. Selling only allows shares you already hold.
 
-Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. The participant trading interface and oracle settlement remain future milestones. The persistent trading APIs are separate from these practice controls.
+Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. The participant trading interface remains a future milestone. The persistent trading APIs are separate from these practice controls.
 
 ## Implementation plan
 
@@ -75,7 +75,7 @@ npm run dev
 
 Open `http://localhost:3000`. The three seed markets are clearly labelled fictional examples, and running the seed again does not duplicate them. The local database port binds to loopback only. All example credentials are synthetic development values and must be replaced before deployment. Keep `.env` private.
 
-The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the current migrations, required schema and enabled application triggers, authentication key, origin, and production trusted-proxy header configuration are available. Readiness does not certify proxy networking or worker health; verify those during deployment. `npm run worker` performs durable order-expiry maintenance. Use `npm run worker -- --once` for one pass, or keep the worker running for periodic expiry checks.
+The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the current migrations, required schema and enabled application triggers, authentication key, origin, and production trusted-proxy header configuration are available. Readiness does not certify proxy networking or worker health; verify those during deployment. `npm run worker` performs durable order-expiry maintenance and resumable market payouts. Use `npm run worker -- --once` for one pass, or keep the worker running for expiry checks and bounded payout batches.
 
 ## Verification
 
@@ -89,7 +89,7 @@ npm run test:http
 
 Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, market lifecycle and HTTP checks create and drop disposable databases, so the test role needs CREATEDB permission. Other integration suites retain synthetic fixtures in the dedicated test database. HTTP migrations and synthetic account records never modify the configured control database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/trading/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
-For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs; the participant trading interface and oracle payouts remain unfinished.
+For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs; the participant trading interface remains unfinished. Direct oracle resolution and collateral-funded payouts are implemented.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
 
@@ -97,14 +97,12 @@ Development dependency overrides replace the Next.js lint plugin's glob dependen
 
 - Price history and watchlists for community markets.
 - Participant trading controls, portfolio valuation, and live market updates.
-- Direct oracle resolution, market voiding, and collateral-funded winning payouts.
 - Pending offline settlement requests and reservations.
 - Private notifications and deployment/backup verification.
 
 ## Next steps
 
 1. Connect participant trading, positions, and live market updates to the persistent APIs.
-2. Add direct oracle resolution, market voiding, and collateral-funded winning payouts.
-3. Add pending offline settlement workflows and deployment/backup verification.
+2. Add pending offline settlement workflows and deployment/backup verification.
 
 Use synthetic data during development. Community trading tests should use explicitly created test markets; the seeded browsing examples are not tradable. Never commit credentials, real account information, payment records, exports, or agent instructions.
