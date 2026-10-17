@@ -71,3 +71,4 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .trading-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }.trading-actions .secondary-button { margin-top:0; }
 .trading-review:focus { outline:2px solid var(--accent); outline-offset:3px; }
 .request-reference { overflow-wrap:anywhere; }.open-order { border-top:1px solid var(--border); padding-top:14px; }.open-order h3 { margin-top:0; }
+.portfolio-links { display:flex; flex-wrap:wrap; gap:12px 24px; }.portfolio-question { white-space:normal; min-width:180px; max-width:360px; }.portfolio-market { min-width:0; border-top:1px solid var(--border); padding-top:16px; }.portfolio section[id] { scroll-margin-top:20px; }

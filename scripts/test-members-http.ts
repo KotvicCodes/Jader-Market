@@ -127,6 +127,17 @@ try {
   check(html.includes(participantHandle) && html.includes("150.125") && !html.includes(adminHandle));
   check((await connection.db.select().from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, participantId))).find(account => account.kind === "wallet")?.balance === 1_501_250n);
 
+  stage = "private cross-market portfolio API and cursor validation";
+  check((await request("/api/account/portfolio", new Map())).status === 401);
+  const portfolioResponse = await request(`/api/account/portfolio?ownerId=${admin.id}`, participantCookies);
+  check(portfolioResponse.status === 200 && portfolioResponse.headers.get("cache-control")?.includes("no-store"));
+  const portfolioData = await portfolioResponse.json();
+  check(portfolioData.member.id === participantId && portfolioData.availableCredits === "1501250");
+  for (const privateField of ["csrfHash", "tokenHash", "passwordHash", "requestHash", adminHandle]) check(!JSON.stringify(portfolioData).includes(privateField));
+  check((await request("/api/account/portfolio?ordersBefore=invalid", participantCookies)).status === 400);
+  check((await request("/api/account/portfolio?fillsBefore=1&fillsBefore=2", participantCookies)).status === 400);
+  check((await (await request("/portfolio?activityBefore=invalid", participantCookies)).text()).includes("Invalid portfolio link"));
+
   stage = "recent administrator authentication";
   await connection.db.update(sessions).set({ authenticatedAt: new Date(Date.now() - 11 * 60_000) }).where(eq(sessions.tokenHash, digest(adminCookies.get("jader_session")!)));
   check((await request("/api/admin/credits", adminCookies, { ...adjustment, operationKey: randomUUID() })).status === 403);
@@ -235,6 +246,15 @@ try {
   stage = "participant partial-fill display and reviewed cancellation endpoint";
   const partialPage = (await (await request(`/markets/${slug}`, participantCookies)).text()).replace(/<[^>]*>/g, "");
   check(partialPage.includes("2 of 3 shares filled; 1 remain open") && partialPage.includes("Cancel remaining 1 shares"));
+  const completePortfolioPage = await request("/portfolio", participantCookies);
+  check(completePortfolioPage.headers.get("cache-control")?.includes("no-store"));
+  const completePortfolioHtml = await completePortfolioPage.text();
+  const completeVisible = completePortfolioHtml.replace(/<[^>]*>/g, "");
+  for (const label of ["Holdings across markets", "All open orders", "Order history", "Fills across markets", "Transaction history", "Cancel remaining 1 shares", sellOrder.id]) check(completeVisible.includes(label));
+  check(!completePortfolioHtml.includes(buyerId) && !completePortfolioHtml.includes(purchaseData.order.id));
+  const buyerComplete = await (await request("/api/account/portfolio", buyerCookies)).json();
+  check(buyerComplete.fills.items[0].side === "buy" && buyerComplete.fills.items[0].total === "5000");
+  check(buyerComplete.activity.items.some((a: { source: string; kind: string; orderReserved: string }) => a.source === "credit" && a.kind === "trade" && a.orderReserved === "-5000"));
   const cancellation = { marketId, operationKey: randomUUID(), orderId: sellOrder.id };
   check((await request("/api/trading/cancel", participantCookies, cancellation)).status === 200);
   check((await request("/api/trading/cancel", participantCookies, cancellation)).status === 200);
@@ -290,6 +310,14 @@ try {
   check(receiptPage.includes("Market payout receipts") && receiptPage.includes(receipts[0].id) && !receiptPage.includes(buyerReceipts[0].id));
   const settledBuyer = (await (await request(`/api/markets/${marketId}/portfolio`, buyerCookies)).json());
   check(settledBuyer.availableCredits === "115000" && settledBuyer.holdings.every((h: { available: string; reserved: string }) => h.available === "0" && h.reserved === "0"));
+
+  const completeSettled = await (await request("/api/account/portfolio", participantCookies)).json();
+  check(completeSettled.holdings.items.length === 0 && completeSettled.openOrders.length === 0);
+  check(completeSettled.payouts.items.length === 2 && completeSettled.payouts.items.some((p: { amount: string }) => p.amount === "0"));
+  if (completeSettled.activity.nextCursor) {
+    const olderActivity = await request(`/api/account/portfolio?activityBefore=${encodeURIComponent(completeSettled.activity.nextCursor)}`, participantCookies);
+    check(olderActivity.status === 200 && (await olderActivity.json()).activity.items.length > 0);
+  }
 
   stage = "reserved offline withdrawals and private operator queue";
   const withdrawalBefore = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();

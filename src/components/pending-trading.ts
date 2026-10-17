@@ -52,6 +52,14 @@ export function pendingTradingStore(ownerId: string, marketId: string) {
       window.addEventListener("storage", listener);
       return () => { listeners.delete(listener); window.removeEventListener("storage", listener); };
     },
+    clear(request: TradingRequest) {
+      // A late replay response must never erase a newer pending request.
+      const raw = window.sessionStorage.getItem(key);
+      if (raw !== null && raw !== JSON.stringify(request)) { notify(); return false; }
+      window.sessionStorage.removeItem(key);
+      notify();
+      return true;
+    },
     save(request: TradingRequest | null) {
       if (request) window.sessionStorage.setItem(key, JSON.stringify(request));
       else window.sessionStorage.removeItem(key);
