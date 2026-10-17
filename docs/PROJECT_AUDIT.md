@@ -2,6 +2,8 @@
 
 Audited revision: `deba183`, application version `0.1.4`.
 
+For the current readiness assessment and eight numbered launch gates, see [the 17 October readiness review](READINESS_REVIEW_2026-10-17.md). This document preserves historical findings.
+
 ## Remediation status — 14 October 2026
 
 This report preserves the original audit of revision `deba183`; the findings below describe that historical state. The authorized remediation batch covers A1–A6 only:

@@ -1,6 +1,6 @@
 {
   "name": "jader-market",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "engines": {
@@ -39,11 +39,12 @@
     "drizzle-kit": "0.31.11",
     "eslint": "10.12.0",
     "eslint-config-next": "16.4.0",
+    "fast-glob": "npm:tinyglobby@0.2.15",
+    "jsdom": "29.1.1",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vite": "7.3.7",
-    "vitest": "5.0.3",
-    "fast-glob": "npm:tinyglobby@0.2.15"
+    "vitest": "5.0.3"
   },
   "overrides": {
     "fast-glob": "$fast-glob",

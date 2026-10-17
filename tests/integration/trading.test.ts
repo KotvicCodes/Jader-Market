@@ -301,11 +301,15 @@ describe("collateral-backed trading", () => {
   });
   it("bounds order and execution history with stable cursors and enforces open-order limits", async () => {
     const id = await market();
+    const resting = await act(bob, "place", id, { quantity: "1", price: "1" });
     for (let i = 0; i < 51; i++) await act(bob, "place", id, { quantity: "1", timeInForce: "IOC" });
     const first = await snapshot(bob, id);
     expect(first.orders).toHaveLength(50); expect(first.nextCursor).not.toBeNull();
+    expect(first.orders.some(order => order.id === (resting.order as { id: string }).id)).toBe(false);
+    expect(first.openOrders.map(order => order.id)).toEqual([(resting.order as { id: string }).id]);
+    expect((await snapshot(alice, id)).openOrders).toEqual([]);
     const second = await tradingSnapshot(bob, id, first.nextCursor!);
-    expect(second.orders).toHaveLength(1);
+    expect(second.orders).toHaveLength(2);
     expect(second.orders[0].sequence).not.toBe(first.orders[49].sequence);
     await expect(tradingSnapshot(bob, id, "1e3")).rejects.toMatchObject({ code: "invalid_request" });
     // Injecting an unreserved order is rejected by the database even before the app limit.

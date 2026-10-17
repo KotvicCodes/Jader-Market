@@ -30,12 +30,14 @@ const password = randomBytes(24).toString("base64url");
 const suffix = randomUUID().slice(0, 8);
 const adminHandle = `http_admin_${suffix}`;
 const participantHandle = `http_user_${suffix}`;
+const buyerHandle = `http_buyer_${suffix}`;
 let stage = "startup";
 let child: ReturnType<typeof spawn> | undefined;
 const adminCookies = new Map<string, string>();
 const participantCookies = new Map<string, string>();
+const buyerCookies = new Map<string, string>();
 
-function check(condition: unknown) { if (!condition) throw new Error("HTTP assertion failed"); }
+function check(condition: unknown) { if (!condition) { const frame = new Error().stack?.split("\n")[2]?.match(/:(\d+):\d+\)?$/)?.[1]; throw new Error(`HTTP assertion failed at check line ${frame ?? "unknown"}`); } }
 
 async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string; client?: string } = {}) {
   const headers: Record<string, string> = { "X-Test-Client-IP": options.client ?? "192.0.2.1", Cookie: Array.from(jar, ([key, value]) => `${key}=${value}`).join("; ") };
@@ -100,6 +102,10 @@ try {
   const created = await request("/api/admin/create-account", adminCookies, { handle: participantHandle, password, role: "admin" });
   check(created.status === 201);
   const { id: participantId } = await created.json();
+  const buyerCreated = await request("/api/admin/create-account", adminCookies, { handle: buyerHandle, password });
+  check(buyerCreated.status === 201);
+  const { id: buyerId } = await buyerCreated.json();
+  check((await request("/api/auth/sign-in", buyerCookies, { handle: buyerHandle, password })).status === 200);
   check((await connection.db.select().from(users).where(eq(users.id, participantId)))[0].role === "participant");
   check((await request("/api/auth/sign-in", participantCookies, { handle: participantHandle, password })).status === 200);
   check((await request("/api/admin/create-account", participantCookies, { handle: `forbidden_${suffix}`, password })).status === 403);
@@ -171,6 +177,7 @@ try {
   check((await request("/api/admin/markets/edit", adminCookies, { ...edit, revision: "2", operationKey: randomUUID() })).status === 409);
   const publicHtml = await (await request(`/markets/${slug}`, new Map())).text();
   check(publicHtml.includes(draft.question) && publicHtml.includes(edit.description) && publicHtml.includes("These published terms are fixed"));
+  check(publicHtml.includes("Sign in to trade"));
   check(!publicHtml.includes("Administration history") && !publicHtml.includes("requestHash") && !publicHtml.includes("operationKey"));
 
   stage = "trading authorization, reservations, matching, and privacy";
@@ -199,20 +206,40 @@ try {
   check(JSON.parse(bookText).book[0].quantity === "3");
   const bookPage = await (await request(`/markets/${slug}`, new Map())).text();
   check(bookPage.includes("Ask") && bookPage.includes("0.25") && !bookPage.includes("No executable orders"));
+  stage = "authenticated market controls and privacy";
+  const tradingPage = await request(`/markets/${slug}`, participantCookies);
+  check(tradingPage.headers.get("cache-control")?.includes("no-store"));
+  const tradingHtml = await tradingPage.text();
+  check(tradingHtml.includes('aria-label="Trading ticket"'));
+  const tradingVisible = tradingHtml.replace(/<[^>]*>/g, "");
+  for (const label of ["Review order", "Your shares in this market", "Your open orders", "Cancel remaining", sellOrder.id]) check(tradingVisible.includes(label));
+  for (const privateValue of [sellOrder.id, participantId, buyerId, participantCookies.get("jader_csrf")!]) check(!bookPage.includes(privateValue));
+  check(!tradingHtml.includes(buyerId) && !tradingHtml.includes(buyerCookies.get("jader_csrf")!));
+  stage = "synthetic market controls";
   const [browsingExample] = await connection.db.insert(markets).values(syntheticMarkets[0]).returning();
   check((await request("/api/trading/mint", participantCookies, { ...mint, marketId: browsingExample.id, operationKey: randomUUID() })).status === 409);
   check((await (await request(`/api/markets/${browsingExample.id}/book`, new Map())).json()).executable === false);
   check((await (await request(`/markets/${browsingExample.slug}`, new Map())).text()).includes("Browsing example only"));
-  check((await request("/api/admin/credits", adminCookies, { recipientId: admin.id, operationKey: randomUUID(), amount: "10", kind: "credit", reason: "demo_grant", confirmed: true })).status === 200);
-  const purchase = await request("/api/trading/place", adminCookies, { ...sell, operationKey: randomUUID(), side: "buy", price: "3000", quantity: "2", timeInForce: "IOC" });
+  stage = "second participant funding and execution";
+  check((await request("/api/admin/credits", adminCookies, { recipientId: buyerId, operationKey: randomUUID(), amount: "10", kind: "credit", reason: "demo_grant", confirmed: true })).status === 200);
+  const purchase = await request("/api/trading/place", buyerCookies, { ...sell, operationKey: randomUUID(), side: "buy", price: "3000", quantity: "2", timeInForce: "IOC" });
   check(purchase.status === 200);
   const purchaseData = await purchase.json();
   check(purchaseData.order.status === "filled" && purchaseData.fills[0].price === "2500");
   const sellerPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
   check(sellerPortfolio.orders[0].remaining === "1" && sellerPortfolio.fills[0].side === "sell");
-  const buyerPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, adminCookies)).json();
+  const buyerPortfolio = await (await request(`/api/markets/${marketId}/portfolio`, buyerCookies)).json();
   check(buyerPortfolio.availableCredits === "95000" && buyerPortfolio.reservedCredits === "0" && buyerPortfolio.holdings[0].available === "2");
   check((await request(`/api/markets/${marketId}/book?before=invalid`, new Map())).status === 400);
+
+  stage = "participant partial-fill display and reviewed cancellation endpoint";
+  const partialPage = (await (await request(`/markets/${slug}`, participantCookies)).text()).replace(/<[^>]*>/g, "");
+  check(partialPage.includes("2 of 3 shares filled; 1 remain open") && partialPage.includes("Cancel remaining 1 shares"));
+  const cancellation = { marketId, operationKey: randomUUID(), orderId: sellOrder.id };
+  check((await request("/api/trading/cancel", participantCookies, cancellation)).status === 200);
+  check((await request("/api/trading/cancel", participantCookies, cancellation)).status === 200);
+  const afterCancel = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
+  check(afterCancel.openOrders.length === 0 && afterCancel.holdings.find((h: { outcome: string }) => h.outcome === "YES").reserved === "0");
 
   stage = "market pause, resume, and permanent close";
   const pause = { id: marketId, revision: "2", operationKey: randomUUID(), confirmed: true };
@@ -257,11 +284,11 @@ try {
   const receipts = (await receiptsResponse.json()).items;
   check(receipts.length === 2 && receipts.every((p: { result: string }) => p.result === "YES"));
   check(receipts.reduce((sum: bigint, p: { amount: string }) => sum+BigInt(p.amount), 0n) === 30000n);
-  const adminReceipts = (await (await request("/api/account/payouts", adminCookies)).json()).items;
-  check(adminReceipts.length === 1 && adminReceipts[0].amount === "20000");
+  const buyerReceipts = (await (await request("/api/account/payouts", buyerCookies)).json()).items;
+  check(buyerReceipts.length === 1 && buyerReceipts[0].amount === "20000");
   const receiptPage = await (await request("/portfolio", participantCookies)).text();
-  check(receiptPage.includes("Market payout receipts") && receiptPage.includes(receipts[0].id) && !receiptPage.includes(adminReceipts[0].id));
-  const settledBuyer = (await (await request(`/api/markets/${marketId}/portfolio`, adminCookies)).json());
+  check(receiptPage.includes("Market payout receipts") && receiptPage.includes(receipts[0].id) && !receiptPage.includes(buyerReceipts[0].id));
+  const settledBuyer = (await (await request(`/api/markets/${marketId}/portfolio`, buyerCookies)).json());
   check(settledBuyer.availableCredits === "115000" && settledBuyer.holdings.every((h: { available: string; reserved: string }) => h.available === "0" && h.reserved === "0"));
 
   stage = "reserved offline withdrawals and private operator queue";
@@ -329,8 +356,9 @@ try {
   check((await request("/api/account/reauthenticate", participantCookies, { password: replacement })).status === 401);
   check((await request("/api/auth/sign-out", adminCookies, {})).status === 200);
   console.info("HTTP accounts, credits, market lifecycle, trading, reserved withdrawals, privacy, CSRF, and session workflows passed.");
-} catch {
+} catch (error) {
   console.error(`HTTP verification failed during ${stage}.`);
+  if (error instanceof Error && /^HTTP assertion failed at check line [0-9]+$/.test(error.message)) console.error(error.message);
   process.exitCode = 1;
 } finally {
   if (child) {

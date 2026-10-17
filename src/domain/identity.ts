@@ -99,10 +99,4 @@ export function parseCredits(value: unknown) {
   return amount;
 }
 
-export function formatCredits(value: bigint) {
-  const negative = value < 0n;
-  const units = negative ? -value : value;
-  const whole = (units / 10_000n).toLocaleString("en-US");
-  const decimals = (units % 10_000n).toString().padStart(4, "0").replace(/0+$/, "").padEnd(2, "0");
-  return `${negative ? "-" : ""}${whole}.${decimals}`;
-}
+export { formatCredits } from "./trading-values";
