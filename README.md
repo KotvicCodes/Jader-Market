@@ -2,7 +2,7 @@
 
 A prediction market prototype inspired by Polymarket for a small closed community. The administrator is the sole oracle. Payments are settled offline and recorded in a private internal ledger.
 
-**Status:** accounts, credits, market administration, and trading backend prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. The participant trading interface and live updates remain unfinished. Direct oracle resolution and collateral-funded payouts are implemented.
+**Status:** accounts, credits, market administration, and participant trading prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. Authenticated market pages provide reviewed mint/burn, buy/sell limit orders, partial-fill feedback, holdings, open-order cancellation and recent fills. A complete cross-market portfolio and automatic refresh remain unfinished. Direct oracle resolution and collateral-funded payouts are implemented.
 
 ## Accounts and credits
 
@@ -47,11 +47,19 @@ For an existing checkout with accounts already configured, run `npm run db:migra
 
 Each change records a private append-only audit entry. Stale edits are rejected rather than overwriting another saved revision. Retrying the same request is safe; if you lose a response, check the saved state/history before starting a different request. There is no delete or reopen control for published markets. Published non-synthetic open markets accept authenticated trading API operations. Seeded browsing examples reject minting and order placement; the worker cancels any legacy resting orders on those examples. Owners can still burn available legacy YES/NO pairs for their backed credits while the market is open and unpaused. After explicitly closing a market, record its final YES, NO, or invalid result with public evidence on the admin page. This resolution is immutable. The worker pays winning shares 1 credit each, losing shares zero, or refunds each outcome share 0.5 credits for an invalid result. The fixed policy is shown before publication. Suspended holders retain their entitlements. Keep the worker running until the market changes from settling to resolved or void; private payout receipts appear in the portfolio. See [the trading backend guide](docs/TRADING_BACKEND.md) for mint/burn, order placement, cancellation, and worker setup.
 
+## Trade through a market page
+
+Sign in as an ordinary participant and open a published non-synthetic market. Review the current order book, available credits and owned shares. Choose buy/sell, outcome, whole-share quantity, limit price in credits and duration; **Review order** shows the maximum credit reservation or owned-share reservation before **Confirm order** submits it. Prices support four decimal places. Immediate-or-cancel may fill partly; other orders keep their remaining reservation until cancellation, expiry or closure.
+
+Use **Mint complete sets** to lock one credit per YES/NO pair and **Burn complete sets** to return one credit per available pair. Reserved shares cannot be burned. **Your open orders** lists every open order in this market, including those older than the recent history page, with a reviewed cancellation action. Holdings and recent fills are private to your account.
+
+The browser saves the exact pending operation in session storage before submission. A lost response blocks new operations and offers **Retry same request**, including after a reload or sign-in; replay returns the original result without spending twice. Keep browser data while a request is unconfirmed. If storage is blocked or corrupt, resolve that condition or reconcile with the operator before continuing. Use **Refresh market** to see other users' changes; automatic refresh and a complete portfolio are still later work. See [Participant trading](docs/PARTICIPANT_TRADING.md) for the two-participant acceptance workflow and limits.
+
 ## Try the demo
 
 Open `http://localhost:3000/demo` after starting the app. This demo works without PostgreSQL or an account and has four fictional markets, sample probability charts, and practice buy/sell controls. Each market starts with 1,000 temporary demo credits. Choose an outcome, enter a whole number of shares, and submit a practice trade to see the balance and positions update. Selling only allows shares you already hold.
 
-Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. The participant trading interface remains a future milestone. The persistent trading APIs are separate from these practice controls.
+Demo quotes stay fixed and simulated trades fill instantly. They do not use a matching engine, submit participant orders, or affect community balances. The demo stores its state only in page memory; leaving or reloading a market resets it. Use **Reset demo** to start again. Persistent trading controls live on published market pages and use your account balance. They are separate from these practice controls.
 
 ## Implementation plan
 

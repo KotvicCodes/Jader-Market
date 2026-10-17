@@ -65,3 +65,9 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .market-controls { align-self:start; }.market-controls .member-form { border-top:1px solid var(--border); padding-top:18px; }
 .market-text { white-space:pre-wrap; overflow-wrap:anywhere; }textarea { resize:vertical; }
 .market-table .market-question { white-space:normal; min-width:240px; max-width:600px; overflow-wrap:anywhere; }.market-question p { margin:4px 0 0; font-size:12px; }
+
+.market-trading-sidebar { min-width:0; }
+.trading-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.trading-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }.trading-actions .secondary-button { margin-top:0; }
+.trading-review:focus { outline:2px solid var(--accent); outline-offset:3px; }
+.request-reference { overflow-wrap:anywhere; }.open-order { border-top:1px solid var(--border); padding-top:14px; }.open-order h3 { margin-top:0; }
