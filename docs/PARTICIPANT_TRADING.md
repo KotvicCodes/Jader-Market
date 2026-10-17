@@ -1,6 +1,6 @@
 # Participant trading controls
 
-Published market pages now use the existing authenticated trading API for complete-set mint/burn, limit orders and cancellation. This implements readiness checklist item 2. Cross-market portfolio history, automatic refresh, operational reconciliation and production acceptance remain separate launch gates.
+Published market pages now use the existing authenticated trading API for complete-set mint/burn, limit orders and cancellation. This implements readiness checklist item 2. The cross-market portfolio implements item 3; see [Participant portfolio](PARTICIPANT_PORTFOLIO.md). Automatic refresh, operational reconciliation and production acceptance remain launch gates.
 
 ## Two-participant rehearsal
 
@@ -25,7 +25,7 @@ Do not clear browser data, switch to another device to repeat a request, or inte
 
 ## Current limits
 
-Balances, holdings and order state refresh after a confirmed local action and through **Refresh market**. They do not yet refresh automatically when another participant trades. The closing deadline disables new actions locally; the server independently enforces eligibility. Every open order in this market is returned separately from paginated recent order history, so an old order cannot lose its cancellation control behind newer completed orders. Recent fills are bounded to the latest 50 in this market; a complete cross-market history belongs to readiness item 3.
+Balances, holdings and order state refresh after a confirmed local action and through **Refresh market**. They do not yet refresh automatically when another participant trades. The closing deadline disables new actions locally; the server independently enforces eligibility. Every open order in this market is returned separately from paginated recent order history, so an old order cannot lose its cancellation control behind newer completed orders. Recent fills are bounded to the latest 50 in this market; the portfolio provides independently paginated cross-market order/fill and credit/share histories without that recent-fill limit.
 
 Market pages now contain private account data when signed in and disable caching. Tokens and other users' order references are never included in public order-book responses. The practice `/demo` experience remains separate and does not spend account credits.
 
