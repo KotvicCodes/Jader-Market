@@ -14,7 +14,7 @@ npm run admin:create
 npm run dev
 ```
 
-`admin:create` runs in an interactive terminal. Choose a handle and a password of 12 to 128 characters; passwords are hidden and never passed as command arguments. It validates the handle and matching passwords and checks database readiness before generating a private `AUTH_SECRET` in `.env` if needed, then creates the sole administrator with zero credits. There are no default sign-in credentials. Restart the app after initial setup so it loads the generated key.
+`admin:create` runs in an interactive terminal. Choose a handle and a password of 12 to 128 characters; passwords are hidden and never passed as command arguments. It validates the handle and matching passwords, checks the current schema and existing administrator, and serializes operator setup before generating a private `AUTH_SECRET` in `.env` if needed. Failed setup restores any generated configuration. An empty exported `AUTH_SECRET` must be removed before using a saved `.env` key; setup never replaces a masked saved key. It then creates the sole administrator with zero credits. There are no default sign-in credentials. Restart the app after initial setup so it loads the generated key.
 
 Administrator setup/recovery, migrations, seeding, and the worker use the existing JavaScript TypeScript compiler, without loading tsx or esbuild. Use the pinned Node.js 22.22.1 version. This lets those commands start even when a shared checkout contains dependencies installed on another operating system. Development, builds, and test tooling still need dependencies installed for their host: if esbuild or another native dependency reports a Linux/macOS mismatch, stop the app and run `npm ci` on that host. Avoid sharing `node_modules` between Linux and macOS checkouts. Neither reinstalling dependencies nor these script changes remove `.env` or database data.
 
@@ -75,7 +75,7 @@ npm run dev
 
 Open `http://localhost:3000`. The three seed markets are clearly labelled fictional examples, and running the seed again does not duplicate them. The local database port binds to loopback only. All example credentials are synthetic development values and must be replaced before deployment. Keep `.env` private.
 
-The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the configured database and market table are available. `npm run worker` performs durable order-expiry maintenance. Use `npm run worker -- --once` for one pass, or keep the worker running for periodic expiry checks.
+The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the current migrations, required schema and enabled application triggers, authentication key, origin, and production trusted-proxy header configuration are available. Readiness does not certify proxy networking or worker health; verify those during deployment. `npm run worker` performs durable order-expiry maintenance. Use `npm run worker -- --once` for one pass, or keep the worker running for periodic expiry checks.
 
 ## Verification
 

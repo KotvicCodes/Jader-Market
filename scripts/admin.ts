@@ -1,10 +1,66 @@
 import "dotenv/config";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { parse } from "dotenv";
 import { createInterface } from "node:readline/promises";
 import { getDatabase } from "../src/db/client";
 import { bootstrapAdministrator, recoverAdministrator } from "../src/db/members";
 import { encryptSecret, MemberError, normalizeHandle, validatePassword } from "../src/domain/identity";
+import { assertDatabaseReady } from "../src/db/readiness";
+
+async function configureAdministrator(handle: string, password: string, recover: boolean) {
+  const connection = getDatabase()!;
+  // Keep the filesystem decision serialized with other operator commands. This
+  // session lock remains held during rollback and is released on process death.
+  const operator = await connection.client.reserve();
+  let previous: string | undefined;
+  let written: string | undefined;
+  let previousMode = 0o600;
+  const temporary = `.env.admin-${process.pid}-${randomBytes(8).toString("hex")}`;
+  try {
+    await operator`SELECT pg_advisory_lock(72491946)`;
+    await assertDatabaseReady(connection.db);
+    if (!recover && (await operator`SELECT id FROM users WHERE role = 'admin' LIMIT 1`).length) throw new MemberError("admin_exists", 409);
+    previous = existsSync(".env") ? readFileSync(".env", "utf8") : undefined;
+    if (previous !== undefined) previousMode = statSync(".env").mode & 0o777;
+    const savedSecret = previous === undefined ? undefined : parse(previous).AUTH_SECRET;
+    // An explicitly empty environment value must never replace a saved key.
+    if (!process.env.AUTH_SECRET && savedSecret) throw new MemberError("configuration");
+    if (!process.env.AUTH_SECRET) {
+      if (recover) throw new MemberError("configuration");
+      // Refuse replacement keys for an already initialized encrypted identity.
+      if ((await operator`SELECT id FROM users WHERE mfa_secret IS NOT NULL LIMIT 1`).length ||
+        (await operator`SELECT token_hash FROM sessions WHERE pending_mfa IS NOT NULL LIMIT 1`).length) throw new MemberError("configuration");
+      const secret = randomBytes(32).toString("hex");
+      const source = previous ?? "";
+      // dotenv uses the last assignment, including exported/whitespace variants.
+      // Append so a later empty duplicate cannot mask the generated key on reload.
+      const next = `${source.trimEnd()}\nAUTH_SECRET=${secret}\n`;
+      writeFileSync(temporary, next, { mode: 0o600, flag: "wx" });
+      renameSync(temporary, ".env");
+      written = next;
+      process.env.AUTH_SECRET = secret;
+    }
+    encryptSecret("configuration check");
+    if (recover) await recoverAdministrator(handle, password);
+    else await bootstrapAdministrator(handle, password);
+  } catch (error) {
+    // Preserve unrelated operator edits rather than overwriting them on failure.
+    if (written !== undefined && existsSync(".env") && readFileSync(".env", "utf8") === written) {
+      if (previous === undefined) rmSync(".env");
+      else {
+        writeFileSync(temporary, previous, { mode: previousMode, flag: "wx" });
+        renameSync(temporary, ".env");
+        chmodSync(".env", previousMode);
+      }
+    }
+    throw error;
+  } finally {
+    rmSync(temporary, { force: true });
+    try { await operator`SELECT pg_advisory_unlock(72491946)`; }
+    finally { operator.release(); }
+  }
+}
 
 async function hiddenPassword(prompt: string) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new MemberError("terminal_required");
@@ -44,20 +100,7 @@ try {
   if (password !== confirmation) throw new MemberError("password_mismatch");
   normalizeHandle(handle);
   validatePassword(password);
-  await getDatabase()!.client`select 1`;
-  // Generate the local encryption key once. It is never printed or stored in git.
-  if (!process.env.AUTH_SECRET) {
-    if (recover) throw new MemberError("configuration");
-    const secret = randomBytes(32).toString("hex");
-    const previous = existsSync(".env") ? readFileSync(".env", "utf8") : "";
-    const next = /^AUTH_SECRET=.*$/m.test(previous) ? previous.replace(/^AUTH_SECRET=.*$/m, `AUTH_SECRET=${secret}`) : `${previous.trimEnd()}\nAUTH_SECRET=${secret}\n`;
-    writeFileSync(".env", next, { mode: 0o600 });
-    chmodSync(".env", 0o600);
-    process.env.AUTH_SECRET = secret;
-  }
-  encryptSecret("configuration check");
-  if (recover) await recoverAdministrator(handle, password);
-  else await bootstrapAdministrator(handle, password);
+  await configureAdministrator(handle, password, recover);
   console.info(recover ? "Administrator recovered. Existing sessions were revoked." : "Administrator created with zero credits.");
   console.info("Sign in on the Account page, then set up your authenticator before using Admin.");
 } catch (error) {
