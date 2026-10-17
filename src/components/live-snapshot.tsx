@@ -73,9 +73,12 @@ export function useLiveSnapshot<T>(initial: T, loadedAt: string, load: (signal: 
     function resume() {
       if (disposed || sessionEnded) return;
       if (!available()) { rerun = false; cancel(); mark(navigator.onLine ? "hidden" : "offline"); }
-      else if (!active && !sessionEnded) {
+      else {
+        // A read started before focus/reconnect cannot verify the resumed page.
+        // Supersede it and coalesce resume events within the start interval.
+        rerun = false;
+        cancel();
         mark("checking");
-        clearTimeout(next);
         next = setTimeout(() => void run(true), Math.max(0, 1_000 - (Date.now() - lastStart)));
       }
     }

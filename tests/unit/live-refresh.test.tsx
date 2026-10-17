@@ -142,6 +142,28 @@ describe("authoritative automatic snapshots", () => {
     expect(container.textContent).toContain("old");
   });
 
+  it("requires a new check on focus even when an older poll is still in flight", async () => {
+    await mountMarket(); await field("price", "0.25"); await field("quantity", "3"); await click("Review order");
+    const oldPoll = deferred<Response>(); fetchMock.mockReturnValueOnce(oldPoll.promise);
+    await advance(10_000);
+    const oldSignal = fetchMock.mock.calls[1][1].signal as AbortSignal;
+    const freshPoll = deferred<Response>(); fetchMock.mockReturnValueOnce(freshPoll.promise);
+    await event("focus");
+    expect(button("Confirm order").disabled).toBe(true);
+    expect(oldSignal.aborted).toBe(true);
+    await act(async () => oldPoll.resolve(response(market)));
+    await advance(999);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(button("Confirm order").disabled).toBe(true);
+    const changed = structuredClone(market); changed.account!.portfolio.availableCredits = "900000";
+    await act(async () => freshPoll.resolve(response(changed)));
+    expect(container.textContent).toContain("Review the current details again");
+    expect([...container.querySelectorAll("button")].some(b => b.textContent === "Confirm order")).toBe(false);
+    expect(container.textContent).toContain("Available credits90.00");
+  });
+
   it("hides private data on session loss or account change without deleting a saved operation", async () => {
     sessionStorage.setItem(storageKey, JSON.stringify({ action: "mint", body: { marketId, operationKey: orderId, quantity: "2" } }));
     await mountMarket();
