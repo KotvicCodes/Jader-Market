@@ -24,8 +24,8 @@ export async function assertDatabaseReady(db: Database | Transaction) {
   // incomplete restore. LIMIT 0 validates columns without reading private rows.
   await db.execute(sql`SELECT m.paused, m.revision, u.mfa_secret, u.password_hash, s.pending_mfa,
     a.market_id, j.trading_operation_id, h.reserved, o.remaining, f.quantity,
-    t.response, b.payload, b.journal_id, ma.revision, d.operation_id, r.evidence, p.quantity
+    t.response, b.payload, b.journal_id, ma.revision, d.operation_id, r.evidence, p.quantity, w.last_operation_id, wo.response, j.withdrawal_operation_id
     FROM markets m, users u, sessions s, ledger_accounts a, journals j,
       holdings h, orders o, fills f, trading_operations t, trading_outbox b,
-      market_audit ma, market_deadline_events d, market_resolutions r, market_payouts p LIMIT 0`);
+      market_audit ma, market_deadline_events d, market_resolutions r, market_payouts p, withdrawals w, withdrawal_operations wo LIMIT 0`);
 }

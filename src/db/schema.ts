@@ -67,8 +67,8 @@ export const ledgerAccounts = pgTable("ledger_accounts", {
   uniqueIndex("ledger_owner_kind_unique").on(table.ownerId, table.kind),
   uniqueIndex("ledger_issuance_unique").on(table.kind).where(sql`${table.kind} = 'issuance'`),
   uniqueIndex("ledger_escrow_unique").on(table.marketId).where(sql`${table.kind} = 'escrow'`),
-  check("ledger_account_kind_valid", sql`${table.kind} IN ('issuance', 'wallet', 'reserved', 'escrow')`),
-  check("ledger_owner_valid", sql`(${table.kind} = 'issuance' AND ${table.ownerId} IS NULL AND ${table.marketId} IS NULL) OR (${table.kind} = 'escrow' AND ${table.ownerId} IS NULL AND ${table.marketId} IS NOT NULL) OR (${table.kind} IN ('wallet', 'reserved') AND ${table.ownerId} IS NOT NULL AND ${table.marketId} IS NULL)`),
+  check("ledger_account_kind_valid", sql`${table.kind} IN ('issuance', 'wallet', 'reserved', 'withdrawal_reserved', 'escrow')`),
+  check("ledger_owner_valid", sql`(${table.kind} = 'issuance' AND ${table.ownerId} IS NULL AND ${table.marketId} IS NULL) OR (${table.kind} = 'escrow' AND ${table.ownerId} IS NULL AND ${table.marketId} IS NOT NULL) OR (${table.kind} IN ('wallet', 'reserved', 'withdrawal_reserved') AND ${table.ownerId} IS NOT NULL AND ${table.marketId} IS NULL)`),
   check("ledger_balance_valid", sql`${table.balance} BETWEEN -9000000000000000 AND 9000000000000000 AND (${table.kind} = 'issuance' OR ${table.balance} >= 0)`),
 ]);
 
@@ -77,6 +77,7 @@ export const journals = pgTable("journals", {
   operationKey: uuid("operation_key").notNull().unique(),
   requestHash: text("request_hash").notNull(),
   tradingOperationId: uuid("trading_operation_id"),
+  withdrawalOperationId: uuid("withdrawal_operation_id"),
   actorId: uuid("actor_id").notNull().references(() => users.id),
   recipientId: uuid("recipient_id").notNull().references(() => users.id),
   kind: text("kind").notNull(),
@@ -87,8 +88,10 @@ export const journals = pgTable("journals", {
 }, table => [
   index("journal_recipient_index").on(table.recipientId, table.createdAt),
   index("journal_trading_operation_index").on(table.tradingOperationId),
+  uniqueIndex("journal_withdrawal_operation_unique").on(table.withdrawalOperationId),
+  check("journal_operation_source", sql`${table.tradingOperationId} IS NULL OR ${table.withdrawalOperationId} IS NULL`),
   check("journal_kind_valid", sql`${table.kind} IN ('credit', 'debit', 'mint', 'burn', 'reserve', 'release', 'trade', 'payout')`),
-  check("journal_reason_valid", sql`${table.reason} IN ('demo_grant', 'offline_credit', 'offline_debit', 'correction', 'trading')`),
+  check("journal_reason_valid", sql`${table.reason} IN ('demo_grant', 'offline_credit', 'offline_debit', 'correction', 'trading', 'withdrawal')`),
   check("journal_amount_valid", sql`${table.amount} BETWEEN 1 AND 10000000000`),
 ]);
 
@@ -254,4 +257,37 @@ export const marketPayouts = pgTable("market_payouts", {
   index("payout_owner_sequence_index").on(table.ownerId, table.sequence),
   index("payout_resolution_index").on(table.resolutionId),
   check("payout_valid", sql`${table.quantity} BETWEEN 1 AND 1000000 AND ${table.amount} BETWEEN 0 AND 10000000000 AND ((${table.amount} = 0) = (${table.journalId} IS NULL))`),
+]);
+
+export const withdrawals = pgTable("withdrawals", {
+  id: uuid("id").primaryKey(),
+  ownerId: uuid("owner_id").notNull().references(() => users.id),
+  amount: bigint("amount", { mode: "bigint" }).notNull(),
+  status: text("status").$type<"requested" | "processing" | "paid" | "cancelled">().notNull(),
+  lastOperationId: uuid("last_operation_id").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("withdrawal_owner_index").on(table.ownerId, table.createdAt, table.id),
+  index("withdrawal_queue_index").on(table.status, table.createdAt, table.id),
+  check("withdrawal_valid", sql`${table.amount} BETWEEN 1 AND 10000000000 AND ${table.status} IN ('requested', 'processing', 'paid', 'cancelled')`),
+]);
+
+export const withdrawalOperations = pgTable("withdrawal_operations", {
+  id: uuid("id").primaryKey(),
+  withdrawalId: uuid("withdrawal_id").notNull().references(() => withdrawals.id),
+  actorId: uuid("actor_id").notNull().references(() => users.id),
+  action: text("action").$type<"request" | "start" | "pay" | "cancel" | "release">().notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status").notNull(),
+  requestHash: text("request_hash").notNull(),
+  reference: text("reference").notNull().default(""),
+  note: text("note").notNull().default(""),
+  response: jsonb("response").$type<Record<string, unknown>>().notNull(),
+  transactionId: bigint("transaction_id", { mode: "bigint" }).notNull().default(sql`txid_current()`),
+  sequence: bigint("sequence", { mode: "bigint" }).generatedAlwaysAsIdentity(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("withdrawal_operation_history_index").on(table.withdrawalId, table.sequence),
+  uniqueIndex("withdrawal_payment_reference_unique").on(table.reference).where(sql`${table.action} = 'pay'`),
+  check("withdrawal_operation_valid", sql`${table.action} IN ('request', 'start', 'pay', 'cancel', 'release') AND length(${table.note}) <= 400 AND length(${table.reference}) <= 120`),
 ]);

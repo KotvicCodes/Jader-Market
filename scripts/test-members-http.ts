@@ -264,6 +264,49 @@ try {
   const settledBuyer = (await (await request(`/api/markets/${marketId}/portfolio`, adminCookies)).json());
   check(settledBuyer.availableCredits === "115000" && settledBuyer.holdings.every((h: { available: string; reserved: string }) => h.available === "0" && h.reserved === "0"));
 
+  stage = "reserved offline withdrawals and private operator queue";
+  const withdrawalBefore = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
+  const withdrawal = { amount: "5.25", operationKey: randomUUID(), confirmed: true, ownerId: admin.id };
+  check((await request("/api/withdrawals/request", new Map(), withdrawal)).status === 401);
+  check((await request("/api/withdrawals/request", participantCookies, withdrawal, { csrf: "invalid" })).status === 403);
+  check((await request("/api/withdrawals/request", participantCookies, withdrawal, { origin: "https://example.invalid" })).status === 403);
+  const withdrawalResponse = await request("/api/withdrawals/request", participantCookies, withdrawal);
+  check(withdrawalResponse.status === 200 && withdrawalResponse.headers.get("cache-control")?.includes("no-store"));
+  const withdrawalRow = await withdrawalResponse.json();
+  check(withdrawalRow.status === "requested" && withdrawalRow.amount === "52500");
+  check((await (await request("/api/withdrawals/request", participantCookies, withdrawal)).json()).id === withdrawalRow.id);
+  const withdrawalBalance = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
+  check(BigInt(withdrawalBefore.availableCredits) - BigInt(withdrawalBalance.availableCredits) === 52500n && withdrawalBalance.reservedCredits === "52500");
+  const privateWithdrawal = await request(`/withdrawals?ownerId=${admin.id}`, participantCookies);
+  check(privateWithdrawal.headers.get("cache-control")?.includes("no-store"));
+  check((await privateWithdrawal.text()).includes(withdrawalRow.id));
+  for (const jar of [new Map<string, string>(), adminCookies]) check(!(await (await request("/withdrawals", jar)).text()).includes(withdrawalRow.id));
+  const queue = await request("/admin/withdrawals", adminCookies);
+  check(queue.headers.get("cache-control")?.includes("no-store") && (await queue.text()).includes(withdrawalRow.id));
+  check(!(await (await request("/admin/withdrawals", participantCookies)).text()).includes(withdrawalRow.id));
+  const withdrawAction = { id: withdrawalRow.id, previousOperationId: withdrawalRow.lastOperationId, operationKey: randomUUID(), confirmed: true };
+  check((await request("/api/withdrawals/start", participantCookies, withdrawAction)).status === 403);
+  check((await request("/api/withdrawals/pay", adminCookies, { ...withdrawAction, reference: `synthetic-early-${suffix}` })).status === 409);
+  check((await request("/api/admin/credits", adminCookies, { recipientId: participantId, amount: "1", kind: "debit", reason: "offline_debit", operationKey: randomUUID(), confirmed: true })).status === 400);
+  const started = await request("/api/withdrawals/start", adminCookies, withdrawAction);
+  check(started.status === 200);
+  const processingWithdrawal = await started.json();
+  const payment = { ...withdrawAction, previousOperationId: processingWithdrawal.lastOperationId, operationKey: randomUUID(), reference: `synthetic-payment-${suffix}` };
+  check((await request("/api/withdrawals/cancel", participantCookies, { ...payment, note: "Synthetic participant cannot cancel processing." })).status === 409);
+  const paid = await request("/api/withdrawals/pay", adminCookies, payment);
+  check(paid.status === 200 && (await paid.json()).status === "paid");
+  check((await request("/api/withdrawals/pay", adminCookies, payment)).status === 200);
+  const afterWithdrawal = await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json();
+  check(afterWithdrawal.availableCredits === withdrawalBalance.availableCredits && afterWithdrawal.reservedCredits === "0");
+  check((await (await request("/withdrawals", participantCookies)).text()).includes(payment.reference));
+  check(!(await (await request("/withdrawals", adminCookies)).text()).includes(payment.reference));
+  const secondWithdrawal = await (await request("/api/withdrawals/request", participantCookies, { ...withdrawal, amount: "1", operationKey: randomUUID() })).json();
+  const secondProcessing = await (await request("/api/withdrawals/start", adminCookies, { ...withdrawAction, id: secondWithdrawal.id, previousOperationId: secondWithdrawal.lastOperationId, operationKey: randomUUID() })).json();
+  const release = { ...withdrawAction, id: secondProcessing.id, previousOperationId: secondProcessing.lastOperationId, operationKey: randomUUID(), note: "Synthetic external records confirm no transfer was sent." };
+  check((await request("/api/withdrawals/release", adminCookies, release)).status === 409);
+  check((await request("/api/withdrawals/release", adminCookies, { ...release, verifiedNotSent: true })).status === 200);
+  check((await (await request(`/api/markets/${marketId}/portfolio`, participantCookies)).json()).availableCredits === afterWithdrawal.availableCredits);
+
   stage = "client-scoped login isolation";
   for (let i = 0; i < 11; i++) {
     const attempt = await request("/api/auth/sign-in", new Map(), { handle: participantHandle, password: "incorrect-password" }, { client: "198.51.100.2" });
@@ -285,7 +328,7 @@ try {
   check((await request("/api/auth/sign-out", participantCookies, {})).status === 200);
   check((await request("/api/account/reauthenticate", participantCookies, { password: replacement })).status === 401);
   check((await request("/api/auth/sign-out", adminCookies, {})).status === 200);
-  console.info("HTTP accounts, credits, market lifecycle, trading, privacy, CSRF, and session workflows passed.");
+  console.info("HTTP accounts, credits, market lifecycle, trading, reserved withdrawals, privacy, CSRF, and session workflows passed.");
 } catch {
   console.error(`HTTP verification failed during ${stage}.`);
   process.exitCode = 1;

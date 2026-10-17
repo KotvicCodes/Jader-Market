@@ -219,7 +219,7 @@ export async function manageParticipant(token: string, targetId: unknown, action
 export async function adjustCredits(token: string, input: { recipientId: unknown; amount: unknown; kind: unknown; reason: unknown; operationKey: unknown; confirmed: unknown }) {
   const { recipientId, kind, reason, operationKey } = input;
   if (typeof recipientId !== "string" || !uuidPattern.test(recipientId) || typeof operationKey !== "string" || !uuidPattern.test(operationKey) || input.confirmed !== true) throw new MemberError("invalid_request");
-  if ((kind !== "credit" && kind !== "debit") || typeof reason !== "string" || !(kind === "credit" ? ["demo_grant", "offline_credit", "correction"] : ["offline_debit", "correction"]).includes(reason)) throw new MemberError("invalid_request");
+  if ((kind !== "credit" && kind !== "debit") || typeof reason !== "string" || !(kind === "credit" ? ["demo_grant", "offline_credit", "correction"] : ["correction"]).includes(reason)) throw new MemberError("invalid_request");
   const amount = parseCredits(input.amount);
   return memberDatabase().db.transaction(async tx => {
     const actor = await readSession(token, tx, true);
@@ -253,7 +253,7 @@ export async function accountSnapshot(token: string, page = 1) {
     const balances = await db.select().from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, session.user.id));
     const history = await db.select({ id: journals.id, kind: journals.kind, reason: journals.reason, amount: journals.amount, createdAt: journals.createdAt }).from(journals).where(and(eq(journals.recipientId, session.user.id), inArray(journals.kind, ["credit", "debit"]))).orderBy(desc(journals.createdAt), desc(journals.id)).limit(21).offset((page - 1) * 20);
     const payouts = await readPayoutHistory(db, session.user.id, page);
-    return { session, payouts, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, reserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, history: history.slice(0, 20), hasNext: history.length > 20 };
+    return { session, payouts, available: balances.find(account => account.kind === "wallet")?.balance ?? 0n, withdrawalReserved: balances.find(account => account.kind === "withdrawal_reserved")?.balance ?? 0n, tradingReserved: balances.find(account => account.kind === "reserved")?.balance ?? 0n, reserved: balances.filter(account => ["reserved", "withdrawal_reserved"].includes(account.kind)).reduce((total, account) => total + account.balance, 0n), history: history.slice(0, 20), hasNext: history.length > 20 };
   }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
