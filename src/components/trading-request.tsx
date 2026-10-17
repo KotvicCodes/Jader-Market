@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestSummary, tradingRejections, tradingResult, type TradingRequest } from "../domain/trading-ticket";
 import { pendingTradingStore } from "./pending-trading";
@@ -96,10 +96,11 @@ export type TradingController = ReturnType<typeof useTradingRequest>;
 
 export function TradingRequestFeedback({ controller }: { controller: TradingController }) {
   const { saved, review, reviewChanged, setReview, busy, refreshing, message, send, submissionBlocked } = controller;
+  const focusReview = useCallback((node: HTMLElement | null) => node?.focus(), []);
   return <>
     {reviewChanged && <p role="alert" className="error">Balances, orders or market state changed. Review the current details again before confirming.</p>}
     {saved.error && <p role="alert" className="error">The browser could not read the saved request. New actions are blocked to avoid repeating a trade. Keep this browser&apos;s data and ask the operator to reconcile any unconfirmed request; do not clear storage to retry.</p>}
-      {review && <section className="notice trading-review" aria-label="Review trading request" tabIndex={-1} ref={node => node?.focus()}>
+      {review && <section className="notice trading-review" aria-label="Review trading request" tabIndex={-1} ref={focusReview}>
         <h3>Review before confirming</h3>{requestSummary(review).map(line => <p key={line}>{line}</p>)}
         <div className="trading-actions"><button type="button" disabled={busy || submissionBlocked} onClick={() => void send(review)}>Confirm {review.action === "place" ? "order" : review.action === "cancel" ? "cancellation" : review.action}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => setReview(null)}>Back to editing</button></div>
       </section>}

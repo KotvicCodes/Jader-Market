@@ -71,6 +71,9 @@ describe("authoritative automatic snapshots", () => {
 
   it("invalidates a review when balances or eligibility change and handles the local deadline", async () => {
     await mountMarket(); await field("price", "0.25"); await field("quantity", "3"); await click("Review order");
+    const link = container.querySelector<HTMLAnchorElement>('a[href="/portfolio"]')!;
+    link.focus(); await advance(10_000);
+    expect(document.activeElement).toBe(link);
     market = structuredClone(market); market.account!.portfolio.availableCredits = "900000";
     await advance(10_000);
     expect(container.textContent).toContain("Review the current details again");
