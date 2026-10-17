@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, getDatabase } from "../../src/db/client";
@@ -70,6 +70,56 @@ describe("collateral-backed trading", () => {
     await expect(act(alice, "burn", id, { quantity: "4" })).rejects.toMatchObject({ code: "insufficient_shares" });
     await expect(act(alice, "mint", id, { quantity: "1000000" })).rejects.toMatchObject({ code: "insufficient_credits" });
     await expect(act(bob, "place", id, { side: "sell" })).rejects.toMatchObject({ code: "insufficient_shares" });
+    await verifyConservation();
+  });
+  it("rejects persistent trading in synthetic browsing examples", async () => {
+    const id = await market({ synthetic: "yes" });
+    const before = await snapshot(alice, id);
+    for (const action of ["mint", "place"] as const) await expect(act(alice, action, id)).rejects.toMatchObject({ code: "trading_unavailable" });
+    await expect(act(alice, "burn", id)).rejects.toMatchObject({ code: "insufficient_shares" });
+    expect((await snapshot(alice, id)).availableCredits).toBe(before.availableCredits);
+    expect((await publicTradingSnapshot(id)).executable).toBe(false);
+    expect((await publicTradingSnapshot(id)).book).toEqual([]);
+    await verifyConservation();
+  });
+  it("records deadline invalidation once even when there are no orders", async () => {
+    const id = await market({ closesAt: new Date(Date.now() - 1000) });
+    await expireTradingOrders();
+    const first = await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id));
+    expect(first).toMatchObject([{ ownerId: null, event: "market.changed", payload: {} }]);
+    await expireTradingOrders();
+    expect(await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id))).toEqual(first);
+  });
+  it("records a passed database deadline even when the application clock is behind", async () => {
+    const [{ now }] = await connection.db.execute(sql`SELECT (extract(epoch FROM clock_timestamp())*1000)::bigint::text AS now`);
+    const databaseNow = Number(now);
+    const id = await market({ closesAt: new Date(databaseNow-1000) });
+    const clock = vi.spyOn(Date, "now").mockReturnValue(databaseNow-3600000);
+    try {
+      await expireTradingOrders();
+      const first = await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id));
+      expect(first).toMatchObject([{ ownerId: null, event: "market.changed", payload: {} }]);
+      await expireTradingOrders();
+      expect(await connection.db.select().from(tradingOutbox).where(eq(tradingOutbox.marketId, id))).toEqual(first);
+    } finally { clock.mockRestore(); }
+  });
+  it("expires GTD orders without prematurely recording a future market deadline when the application clock is ahead", async () => {
+    const expiry = new Date(Math.ceil((Date.now()+1500)/1000)*1000);
+    const closesAt = new Date(expiry.getTime()+1800000);
+    const id = await market({ closesAt });
+    const placed = await act(bob, "place", id, { timeInForce: "GTD", expiresAt: expiry.toISOString().replace(".000Z", "Z") });
+    const orderId = (placed.order as { id: string }).id;
+    const [{ balance: reservedBefore }] = await connection.db.select().from(ledgerAccounts).where(sql`${ledgerAccounts.ownerId}=${ids.get(bob)} AND ${ledgerAccounts.kind}='reserved'`);
+    await delay(Math.max(0, expiry.getTime()-Date.now()+30));
+    const clock = vi.spyOn(Date, "now").mockReturnValue(closesAt.getTime()+3600000);
+    try {
+      await expect(expireTradingOrders()).resolves.toBeGreaterThanOrEqual(1);
+      expect((await connection.db.select().from(orders).where(eq(orders.id, orderId)))[0]).toMatchObject({ status: "expired", reason: "time_expired" });
+      const [{ balance: reservedAfter }] = await connection.db.select().from(ledgerAccounts).where(sql`${ledgerAccounts.ownerId}=${ids.get(bob)} AND ${ledgerAccounts.kind}='reserved'`);
+      expect(reservedBefore-reservedAfter).toBe(15000n);
+      expect(await connection.db.execute(sql`SELECT 1 FROM market_deadline_events WHERE market_id=${id}`)).toHaveLength(0);
+      expect(await expireTradingOrders()).toBe(0);
+    } finally { clock.mockRestore(); }
     await verifyConservation();
   });
   it("matches buy takers at maker price with partial fills and immediate improvement refunds", async () => {

@@ -56,6 +56,7 @@ async function releaseOrder(tx: Transaction, ctx: Context, order: Order, status:
   }
   await tx.update(orders).set({ status, reason }).where(eq(orders.id, order.id));
   await event(tx, ctx, "order.changed", order.ownerId, { orderId: order.id });
+  await event(tx, ctx, "portfolio.changed", order.ownerId);
 }
 
 async function finishOperation(tx: Transaction, ctx: Context, action: string, requestHash: string, response: Record<string, unknown>) {
@@ -64,13 +65,13 @@ async function finishOperation(tx: Transaction, ctx: Context, action: string, re
 }
 
 async function cleanMarket(tx: Transaction, ctx: Context) {
-  const stale = await tx.select({ order: orders, suspended: users.suspended, status: markets.status, closesAt: markets.closesAt })
+  const stale = await tx.select({ order: orders, suspended: users.suspended, status: markets.status, deadlinePassed: sql<boolean>`${markets.closesAt} <= clock_timestamp()`, synthetic: markets.synthetic })
     .from(orders).innerJoin(users, eq(users.id, orders.ownerId)).innerJoin(markets, eq(markets.id, orders.marketId))
-    .where(and(eq(orders.marketId, ctx.marketId), eq(orders.status, "open"), or(eq(users.suspended, true), sql`${markets.status} <> 'open'`, sql`${markets.closesAt} <= clock_timestamp()`, sql`${orders.expiresAt} <= clock_timestamp()`)))
+    .where(and(eq(orders.marketId, ctx.marketId), eq(orders.status, "open"), or(eq(users.suspended, true), eq(markets.synthetic, "yes"), sql`${markets.status} <> 'open'`, sql`${markets.closesAt} <= clock_timestamp()`, sql`${orders.expiresAt} <= clock_timestamp()`)))
     .orderBy(asc(orders.sequence)).for("update", { of: orders });
   for (const record of stale) {
     const suspended = record.suspended;
-    await releaseOrder(tx, ctx, record.order, suspended || record.status !== "open" ? "cancelled" : "expired", suspended ? "account_suspended" : record.status !== "open" || record.closesAt.getTime() <= Date.now() ? "market_closed" : "time_expired");
+    await releaseOrder(tx, ctx, record.order, suspended || record.synthetic === "yes" || record.status !== "open" ? "cancelled" : "expired", suspended ? "account_suspended" : record.synthetic === "yes" ? "synthetic_unavailable" : record.status !== "open" || record.deadlinePassed ? "market_closed" : "time_expired");
   }
   return stale.length;
 }
@@ -90,6 +91,8 @@ export async function mutateTrading(token: string, action: TradingAction, input:
     }
     const [market] = await tx.select().from(markets).where(eq(markets.id, ctx.marketId)).for("update");
     if (!market || market.status === "draft") throw new MemberError("market_missing", 404);
+    // Supply-reducing redemption must remain available for pre-upgrade pairs.
+    if ((parsed.action === "mint" || parsed.action === "place") && market.synthetic === "yes") throw new MemberError("trading_unavailable", 409);
     if (parsed.action !== "cancel" && effectiveMarketStatus(market) !== "open") throw new MemberError("trading_closed", 409);
     // Complete-set operations must only contain their own mint/burn movements.
     if (parsed.action === "place" || parsed.action === "cancel") await cleanMarket(tx, ctx);
@@ -164,13 +167,17 @@ export async function mutateTrading(token: string, action: TradingAction, input:
         const fill = { id, price: maker.price.toString(), quantity: quantity.toString(), outcome: parsed.outcome };
         executed.push(fill);
         await event(tx, ctx, "trade.executed", null, { price: fill.price, quantity: fill.quantity, outcome: fill.outcome });
-        for (const order of [maker, taker]) await event(tx, ctx, "order.changed", order.ownerId, { orderId: order.id });
+        for (const order of [maker, taker]) {
+          await event(tx, ctx, "order.changed", order.ownerId, { orderId: order.id });
+          await event(tx, ctx, "portfolio.changed", order.ownerId);
+        }
       }
       if (parsed.timeInForce === "IOC" && taker.status === "open") {
         await releaseOrder(tx, ctx, taker, "cancelled", "ioc_remainder");
         taker.status = "cancelled"; taker.reason = "ioc_remainder";
       }
       await event(tx, ctx, "order.changed", member.user.id, { orderId: taker.id });
+      await event(tx, ctx, "portfolio.changed", member.user.id);
       response = { order: orderView(taker), fills: executed };
     }
     await finishOperation(tx, ctx, parsed.action, requestHash, response);
@@ -194,13 +201,27 @@ export async function cancelTradingOrders(tx: Transaction, filter: { marketId?: 
 export async function expireTradingOrders() {
   return memberDatabase().db.transaction(async tx => {
     await lockTransactions(tx);
-    const stale = await tx.selectDistinct({ marketId: orders.marketId }).from(orders).innerJoin(markets, eq(markets.id, orders.marketId)).innerJoin(users, eq(users.id, orders.ownerId)).where(and(eq(orders.status, "open"), or(eq(users.suspended, true), sql`${markets.status} <> 'open'`, sql`${markets.closesAt} <= clock_timestamp()`, sql`${orders.expiresAt} <= clock_timestamp()`))).orderBy(asc(orders.marketId)).limit(20);
+    const stale = await tx.select({ marketId: markets.id }).from(markets).where(sql`
+      (${markets.status} = 'open' AND ${markets.closesAt} <= clock_timestamp()
+        AND NOT EXISTS (SELECT 1 FROM market_deadline_events d WHERE d.market_id = ${markets.id}))
+      OR EXISTS (SELECT 1 FROM orders o JOIN users u ON u.id = o.owner_id
+        WHERE o.market_id = ${markets.id} AND o.status = 'open'
+          AND (u.suspended OR ${markets.synthetic} = 'yes' OR ${markets.status} <> 'open' OR ${markets.closesAt} <= clock_timestamp() OR o.expires_at <= clock_timestamp()))
+    `).orderBy(asc(markets.id)).limit(20);
     let expired = 0;
     for (const { marketId } of stale) {
-      await tx.select({ id: markets.id }).from(markets).where(eq(markets.id, marketId)).for("update");
+      const [market] = await tx.select().from(markets).where(eq(markets.id, marketId)).for("update");
       const ctx: Context = { id: randomUUID(), ownerId: null, marketId };
       const count = await cleanMarket(tx, ctx);
-      if (count) { expired += count; await finishOperation(tx, ctx, "maintenance", digest("expiry"), { expired: count }); }
+      let deadline = false;
+      if (market.status === "open") {
+        const inserted = await tx.execute(sql`INSERT INTO market_deadline_events (market_id, operation_id)
+          SELECT ${marketId}, ${ctx.id} FROM markets
+          WHERE id=${marketId} AND status='open' AND closes_at<=clock_timestamp()
+          ON CONFLICT DO NOTHING RETURNING market_id`);
+        deadline = inserted.length > 0;
+      }
+      if (count || deadline) { expired += count; await finishOperation(tx, ctx, "maintenance", digest("expiry"), { expired: count, deadline }); }
     }
     return expired;
   });
@@ -213,7 +234,7 @@ export async function tradingSnapshot(token: string, inputMarketId: string, befo
   return memberDatabase().db.transaction(async tx => {
     const session = await readSession(token, tx);
     requireMember(session);
-    const [market] = await tx.select({ status: markets.status, paused: markets.paused, closesAt: markets.closesAt }).from(markets).where(eq(markets.id, marketId));
+    const [market] = await tx.select({ status: markets.status, paused: markets.paused, closesAt: markets.closesAt, synthetic: markets.synthetic }).from(markets).where(eq(markets.id, marketId));
     if (!market || market.status === "draft") throw new MemberError("market_missing", 404);
     const balances = await tx.select({ kind: ledgerAccounts.kind, balance: ledgerAccounts.balance }).from(ledgerAccounts).where(eq(ledgerAccounts.ownerId, session.user.id));
     const stock = await tx.select({ outcome: holdings.outcome, available: holdings.available, reserved: holdings.reserved }).from(holdings).where(and(eq(holdings.ownerId, session.user.id), eq(holdings.marketId, marketId)));
@@ -236,11 +257,11 @@ export async function publicTradingSnapshot(inputMarketId: string, before?: stri
   const marketId = marketUuid(inputMarketId);
   const cursor = before === undefined ? undefined : integerCursor(before);
   return memberDatabase().db.transaction(async tx => {
-    const [market] = await tx.select({ status: markets.status, paused: markets.paused, closesAt: markets.closesAt }).from(markets).where(eq(markets.id, marketId));
+    const [market] = await tx.select({ status: markets.status, paused: markets.paused, closesAt: markets.closesAt, synthetic: markets.synthetic }).from(markets).where(eq(markets.id, marketId));
     if (!market || market.status === "draft") throw new MemberError("market_missing", 404);
     const status = effectiveMarketStatus(market);
-    const book = status === "closed" ? [] : await tx.select({ outcome: orders.outcome, side: orders.side, price: orders.price, quantity: sql<string>`sum(${orders.remaining})::text` }).from(orders).innerJoin(users, eq(users.id, orders.ownerId)).where(and(eq(orders.marketId, marketId), eq(orders.status, "open"), eq(users.suspended, false), or(isNull(orders.expiresAt), gt(orders.expiresAt, new Date())))).groupBy(orders.outcome, orders.side, orders.price).orderBy(asc(orders.outcome), asc(orders.side), sql`CASE WHEN ${orders.side} = 'buy' THEN -${orders.price} ELSE ${orders.price} END`);
+    const book = !["open", "paused"].includes(status) || market.synthetic === "yes" ? [] : await tx.select({ outcome: orders.outcome, side: orders.side, price: orders.price, quantity: sql<string>`sum(${orders.remaining})::text` }).from(orders).innerJoin(users, eq(users.id, orders.ownerId)).where(and(eq(orders.marketId, marketId), eq(orders.status, "open"), eq(users.suspended, false), or(isNull(orders.expiresAt), gt(orders.expiresAt, new Date())))).groupBy(orders.outcome, orders.side, orders.price).orderBy(asc(orders.outcome), asc(orders.side), sql`CASE WHEN ${orders.side} = 'buy' THEN -${orders.price} ELSE ${orders.price} END`);
     const history = await tx.select({ outcome: fills.outcome, price: fills.price, quantity: fills.quantity, sequence: fills.sequence, createdAt: fills.createdAt }).from(fills).where(and(eq(fills.marketId, marketId), cursor ? lt(fills.sequence, cursor) : undefined)).orderBy(desc(fills.sequence)).limit(51);
-    return { status, executable: status === "open", book: book.map(level => ({ ...level, price: level.price.toString() })), trades: history.slice(0, 50).map(fill => ({ ...fill, price: fill.price.toString(), quantity: fill.quantity.toString(), sequence: fill.sequence.toString(), createdAt: fill.createdAt.toISOString() })), nextCursor: history.length > 50 ? history[49].sequence.toString() : null };
+    return { status, executable: status === "open" && market.synthetic !== "yes", book: book.map(level => ({ ...level, price: level.price.toString() })), trades: history.slice(0, 50).map(fill => ({ ...fill, price: fill.price.toString(), quantity: fill.quantity.toString(), sequence: fill.sequence.toString(), createdAt: fill.createdAt.toISOString() })), nextCursor: history.length > 50 ? history[49].sequence.toString() : null };
   }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }

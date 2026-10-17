@@ -4,6 +4,7 @@ import { digest, MemberError } from "../domain/identity";
 import { marketRevision, marketUuid, parseMarketTerms, type MarketAction } from "../domain/market-admin";
 import { memberDatabase, readSession, requireAdministrator } from "./members";
 import { marketAudit, markets } from "./schema";
+import { recordMarketChange } from "./events";
 
 export async function mutateMarket(token: string, action: MarketAction, input: Record<string, unknown>) {
   const operationKey = marketUuid(input.operationKey);
@@ -54,6 +55,7 @@ export async function mutateMarket(token: string, action: MarketAction, input: R
       await tx.update(markets).set({ ...changes, revision: nextRevision }).where(eq(markets.id, id));
     }
     await tx.insert(marketAudit).values({ marketId: id, actorId: actor.user.id, operationKey, requestHash, action, revision: nextRevision });
+    await recordMarketChange(tx, id, actor.user.id, requestHash, action !== "create" && action !== "edit");
     return { id, revision: nextRevision };
   });
 }
