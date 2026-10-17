@@ -8,7 +8,8 @@ import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDatabase, getDatabase } from "../../src/db/client";
 import { expireTradingOrders, mutateTrading, publicTradingSnapshot, tradingSnapshot } from "../../src/db/trading";
-import { holdings, journals, ledgerAccounts, ledgerEntries, markets, orders, sessions, shareMovements, tradingOperations, users } from "../../src/db/schema";
+import { holdings, ledgerAccounts, ledgerEntries, markets, orders, sessions, shareMovements, tradingOperations, users } from "../../src/db/schema";
+import { legacyJournal } from "../fixtures/legacy-trading";
 import { digest, randomToken } from "../../src/domain/identity";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -26,7 +27,7 @@ let ownerId: string, marketId: string, walletId: string, escrowId: string, yesId
 async function legacyMint() {
   return connection.db.transaction(async tx => {
     const id = randomUUID(), journalId = randomUUID();
-    await tx.insert(journals).values({ id: journalId, operationKey: journalId, requestHash: "legacy-mint", actorId: ownerId, recipientId: ownerId, kind: "mint", reason: "trading", amount: 50000n, tradingOperationId: id });
+    await legacyJournal(tx, { id: journalId, operationKey: journalId, requestHash: "legacy-mint", actorId: ownerId, recipientId: ownerId, kind: "mint", reason: "trading", amount: 50000n, tradingOperationId: id });
     await tx.insert(ledgerEntries).values([{ journalId, accountId: walletId, delta: -50000n }, { journalId, accountId: escrowId, delta: 50000n }]);
     await tx.insert(shareMovements).values([yesId, noId].map(holdingId => ({ operationId: id, groupId: journalId, holdingId, kind: "mint", availableDelta: 5n, reservedDelta: 0n })));
     await tx.insert(tradingOperations).values({ id, ownerId, marketId, action: "mint", requestHash: "legacy-mint", response: {} });
@@ -59,7 +60,7 @@ beforeAll(async () => {
   walletId = wallet.id;
   await connection.db.insert(sessions).values({ userId: ownerId, tokenHash: digest(token), csrfHash: digest(randomToken()), expiresAt: new Date(Date.now() + 3600000) });
   await connection.db.transaction(async tx => {
-    const [journal] = await tx.insert(journals).values({ operationKey: randomUUID(), requestHash: "legacy-credit", actorId: admin.id, recipientId: ownerId, kind: "credit", reason: "correction", amount: 100000n }).returning();
+    const journal = await legacyJournal(tx, { operationKey: randomUUID(), requestHash: "legacy-credit", actorId: admin.id, recipientId: ownerId, kind: "credit", reason: "correction", amount: 100000n });
     await tx.insert(ledgerEntries).values([{ journalId: journal.id, accountId: issuance.id, delta: -100000n }, { journalId: journal.id, accountId: walletId, delta: 100000n }]);
   });
   const [market] = await connection.db.insert(markets).values({ slug: "legacy-synthetic", question: "Will this fictional event occur?", description: "Legacy synthetic upgrade fixture.", category: "community", resolutionRules: "Use the fictional event record to resolve.", resolutionSource: "Fictional record", closesAt: new Date("2035-12-31T12:00:00Z"), publishedAt: new Date(), status: "open", synthetic: "yes" }).returning();

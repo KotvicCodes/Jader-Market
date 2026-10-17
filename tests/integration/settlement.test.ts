@@ -13,6 +13,7 @@ import { mutateTrading } from "../../src/db/trading";
 import { payoutHistory, publicResolution, settleMarkets } from "../../src/db/settlement";
 import { holdings, ledgerAccounts, marketPayouts, marketResolutions, markets, sessions, shareMovements, tradingOperations, tradingOutbox, users, orders } from "../../src/db/schema";
 import { digest, encryptSecret, randomToken } from "../../src/domain/identity";
+import { legacyCredit, legacyMintAndAsk } from "../fixtures/legacy-trading";
 import type { TradingAction } from "../../src/domain/trading";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -36,7 +37,7 @@ beforeAll(async () => {
   const previous = mkdtempSync(join(tmpdir(), "jader-upgrade-"));
   try {
     const journal = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8"));
-    journal.entries.pop();
+    journal.entries = journal.entries.filter((entry: { idx: number }) => entry.idx <= 4);
     mkdirSync(join(previous, "meta"));
     writeFileSync(join(previous, "meta/_journal.json"), JSON.stringify(journal));
     for (const entry of journal.entries) copyFileSync(`drizzle/${entry.tag}.sql`, join(previous, `${entry.tag}.sql`));
@@ -49,11 +50,9 @@ beforeAll(async () => {
     await connection.db.insert(ledgerAccounts).values([{ ownerId: user.id, kind: "wallet" }, { ownerId: user.id, kind: "reserved" }]);
     await connection.db.insert(sessions).values({ userId: user.id, tokenHash: digest(token), csrfHash: digest(randomToken()), expiresAt: new Date(Date.now() + 3600000) });
   }
-  for (const token of [alice, bob]) await fund(token, "100");
+  for (const token of [alice, bob]) await legacyCredit(connection.db, ids.get(admin)!, ids.get(token)!, 1000000n);
   legacyMarket = await market();
-  await act(alice, "mint", legacyMarket);
-  const resting = await act(alice, "place", legacyMarket, { side: "sell", quantity: "2" });
-  legacyOrder = (resting.order as { id: string }).id;
+  legacyOrder = await legacyMintAndAsk(connection.db, ids.get(alice)!, legacyMarket);
   await migrate(connection.db, { migrationsFolder: "drizzle" });
 });
 afterAll(async () => {
