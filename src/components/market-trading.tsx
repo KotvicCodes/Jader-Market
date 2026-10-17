@@ -84,7 +84,7 @@ export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, sn
       if (!response.ok) {
         const code = typeof data.error === "string" ? data.error : "unavailable";
         if (response.status >= 400 && response.status < 500 && Object.hasOwn(tradingRejections, code)) {
-          store.save(null);
+          store.clear(request);
           setMessage({ text: tradingRejections[code], error: true });
           refresh();
           return;
@@ -98,7 +98,7 @@ export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, sn
         return;
       }
       const text = tradingResult(request, data);
-      store.save(null);
+      store.clear(request);
       setMessage({ text, error: false });
       refresh();
     } catch {
