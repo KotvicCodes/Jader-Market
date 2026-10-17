@@ -11,6 +11,6 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const input: Record<string, unknown> = {};
     for (const key of params.keys()) input[key] = params.getAll(key).length === 1 ? params.get(key) : params.getAll(key);
-    return memberResponse(await portfolioSnapshot(member.token, input));
+    return memberResponse({ ...await portfolioSnapshot(member.token, input), csrf: member.csrf });
   } catch (error) { return memberFailure(error); }
 }

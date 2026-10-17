@@ -39,13 +39,14 @@ const buyerCookies = new Map<string, string>();
 
 function check(condition: unknown) { if (!condition) { const frame = new Error().stack?.split("\n")[2]?.match(/:(\d+):\d+\)?$/)?.[1]; throw new Error(`HTTP assertion failed at check line ${frame ?? "unknown"}`); } }
 
-async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string; client?: string } = {}) {
+async function request(path: string, jar: Map<string, string>, body?: Record<string, unknown>, options: { origin?: string; csrf?: string; raw?: string; client?: string; expectedOwner?: string } = {}) {
   const headers: Record<string, string> = { "X-Test-Client-IP": options.client ?? "192.0.2.1", Cookie: Array.from(jar, ([key, value]) => `${key}=${value}`).join("; ") };
   if (body || options.raw) {
     headers["Content-Type"] = "application/json";
     headers.Origin = options.origin ?? origin;
     headers["X-CSRF-Token"] = options.csrf ?? jar.get("jader_csrf") ?? "";
   }
+  if (options.expectedOwner) headers["X-Account-ID"] = options.expectedOwner;
   const response = await fetch(`${origin}${path}`, { method: body || options.raw ? "POST" : "GET", headers, body: options.raw ?? (body ? JSON.stringify(body) : undefined), redirect: "manual" });
   for (const cookie of response.headers.getSetCookie()) {
     const [pair] = cookie.split(";");
@@ -217,6 +218,20 @@ try {
   check(JSON.parse(bookText).book[0].quantity === "3");
   const bookPage = await (await request(`/markets/${slug}`, new Map())).text();
   check(bookPage.includes("Ask") && bookPage.includes("0.25") && !bookPage.includes("No executable orders"));
+  stage = "automatic market snapshots and account-bound submissions";
+  const anonymousSnapshotResponse = await request(`/api/markets/${marketId}/snapshot`, new Map());
+  check(anonymousSnapshotResponse.status === 200 && anonymousSnapshotResponse.headers.get("cache-control")?.includes("no-store"));
+  const anonymousSnapshotText = await anonymousSnapshotResponse.text();
+  const anonymousSnapshot = JSON.parse(anonymousSnapshotText);
+  check(anonymousSnapshot.account === null && anonymousSnapshot.trading.book[0].quantity === "3");
+  for (const value of [participantId, admin.id, sellOrder.id, participantHandle, participantCookies.get("jader_csrf")!]) check(!anonymousSnapshotText.includes(value));
+  const ownerSnapshot = await (await request(`/api/markets/${marketId}/snapshot`, participantCookies)).json();
+  check(ownerSnapshot.account.ownerId === participantId && ownerSnapshot.account.csrf === participantCookies.get("jader_csrf"));
+  check(ownerSnapshot.account.portfolio.openOrders[0].id === sellOrder.id);
+  const changedAccount = await request("/api/trading/mint", participantCookies, { ...mint, operationKey: randomUUID() }, { expectedOwner: buyerId });
+  check(changedAccount.status === 401 && (await changedAccount.json()).error === "account_changed");
+  check((await (await request(`/api/markets/${marketId}/snapshot`, participantCookies)).json()).account.portfolio.availableCredits === ownerSnapshot.account.portfolio.availableCredits);
+  check((await request("/api/markets/not-a-uuid/snapshot", new Map())).status === 400);
   stage = "authenticated market controls and privacy";
   const tradingPage = await request(`/markets/${slug}`, participantCookies);
   check(tradingPage.headers.get("cache-control")?.includes("no-store"));
@@ -243,6 +258,9 @@ try {
   check(buyerPortfolio.availableCredits === "95000" && buyerPortfolio.reservedCredits === "0" && buyerPortfolio.holdings[0].available === "2");
   check((await request(`/api/markets/${marketId}/book?before=invalid`, new Map())).status === 400);
 
+  const refreshedSnapshot = await (await request(`/api/markets/${marketId}/snapshot`, participantCookies)).json();
+  check(refreshedSnapshot.trading.book[0].quantity === "1" && refreshedSnapshot.account.portfolio.fills[0].quantity === "2");
+  check(refreshedSnapshot.account.portfolio.openOrders[0].remaining === "1");
   stage = "participant partial-fill display and reviewed cancellation endpoint";
   const partialPage = (await (await request(`/markets/${slug}`, participantCookies)).text()).replace(/<[^>]*>/g, "");
   check(partialPage.includes("2 of 3 shares filled; 1 remain open") && partialPage.includes("Cancel remaining 1 shares"));
@@ -311,6 +329,9 @@ try {
   const settledBuyer = (await (await request(`/api/markets/${marketId}/portfolio`, buyerCookies)).json());
   check(settledBuyer.availableCredits === "115000" && settledBuyer.holdings.every((h: { available: string; reserved: string }) => h.available === "0" && h.reserved === "0"));
 
+  const settledSnapshot = await (await request(`/api/markets/${marketId}/snapshot`, participantCookies)).json();
+  check(settledSnapshot.trading.status === "resolved" && settledSnapshot.resolution.result === "YES");
+  check(settledSnapshot.account.portfolio.holdings.every((h: { available: string; reserved: string }) => h.available === "0" && h.reserved === "0"));
   const completeSettled = await (await request("/api/account/portfolio", participantCookies)).json();
   check(completeSettled.holdings.items.length === 0 && completeSettled.openOrders.length === 0);
   check(completeSettled.payouts.items.length === 2 && completeSettled.payouts.items.some((p: { amount: string }) => p.amount === "0"));

@@ -2,7 +2,7 @@
 
 A prediction market prototype inspired by Polymarket for a small closed community. The administrator is the sole oracle. Payments are settled offline and recorded in a private internal ledger.
 
-**Status:** accounts, credits, market administration, and participant trading prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. Authenticated market pages provide reviewed mint/burn, buy/sell limit orders, partial-fill feedback, holdings, open-order cancellation and recent fills. The private portfolio shows cross-market holdings, all open orders with cancellation, paginated fills and credit/share history, and payout receipts. Automatic refresh remains unfinished. Direct oracle resolution and collateral-funded payouts are implemented.
+**Status:** accounts, credits, market administration, and participant trading prototype. Administrator-created accounts, sign-in, administrator MFA, persistent private balances/history, audited credit adjustments, private market drafts, immutable publication, and pause/resume/close controls are implemented. Persistent trading APIs support complete sets, reservations, order matching, and cancellation. Authenticated market pages provide reviewed mint/burn, buy/sell limit orders, partial-fill feedback, holdings, open-order cancellation and recent fills. The private portfolio shows cross-market holdings, all open orders with cancellation, paginated fills and credit/share history, and payout receipts. Active market and portfolio tabs poll authoritative snapshots with visible freshness, reconnect checks and bounded retry delays. Direct oracle resolution and collateral-funded payouts are implemented.
 
 ## Accounts and credits
 
@@ -53,11 +53,11 @@ Sign in as an ordinary participant and open a published non-synthetic market. Re
 
 Use **Mint complete sets** to lock one credit per YES/NO pair and **Burn complete sets** to return one credit per available pair. Reserved shares cannot be burned. **Your open orders** lists every open order in this market, including those older than the recent history page, with a reviewed cancellation action. Holdings and recent fills are private to your account.
 
-The browser saves the exact pending operation in session storage before submission. A lost response blocks new operations and offers **Retry same request**, including after a reload or sign-in; replay returns the original result without spending twice. Keep browser data while a request is unconfirmed. If storage is blocked or corrupt, resolve that condition or reconcile with the operator before continuing. Use **Refresh market** to see other users' changes; automatic refresh remains later work. The private portfolio provides cross-market history and cancellation. See [Participant trading](docs/PARTICIPANT_TRADING.md) for the two-participant acceptance workflow and limits.
+The browser saves the exact pending operation in session storage before submission. A lost response blocks new operations and offers **Retry same request**, including after a reload or sign-in; replay returns the original result without spending twice. Keep browser data while a request is unconfirmed. If storage is blocked or corrupt, resolve that condition or reconcile with the operator before continuing. Active tabs check current state every 10 seconds and on reconnect/focus; **Refresh market** is also available. Stale or offline state pauses submissions, and changed balances/orders/quotes require a new review. The private portfolio provides cross-market history and cancellation. See [Participant trading](docs/PARTICIPANT_TRADING.md) for the two-participant acceptance workflow and [Automatic refresh](docs/AUTOMATIC_REFRESH.md) for reconnect behavior and limits.
 
 ## Review your portfolio
 
-Open `/portfolio` after signing in. Available credits and separate order/withdrawal reservations accompany holdings across markets, all open orders with reviewed cancellation, fills, complete credit/share movement history and payout receipts. Use each section's **Older** and **Latest** links independently; history pagination never hides an open order's cancellation control. Choose **Refresh portfolio** to load later activity. All sections come from one consistent database snapshot; share quantities do not imply a valuation or profit. See [Participant portfolio](docs/PARTICIPANT_PORTFOLIO.md) for history semantics, cancellation recovery and a rehearsal.
+Open `/portfolio` after signing in. Available credits and separate order/withdrawal reservations accompany holdings across markets, all open orders with reviewed cancellation, fills, complete credit/share movement history and payout receipts. Use each section's **Older** and **Latest** links independently; history pagination never hides an open order's cancellation control. Active tabs update automatically without changing the selected history cursors; **Refresh portfolio** is also available. All sections come from one consistent database snapshot; share quantities do not imply a valuation or profit. See [Participant portfolio](docs/PARTICIPANT_PORTFOLIO.md) for history semantics, cancellation recovery and a rehearsal.
 
 ## Try the demo
 
@@ -101,21 +101,21 @@ npm run test:http
 
 Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, market lifecycle and HTTP checks create and drop disposable databases, so the test role needs CREATEDB permission. Other integration suites retain synthetic fixtures in the dedicated test database. HTTP migrations and synthetic account records never modify the configured control database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/trading/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
-For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs and reviewed participant controls; automatic refresh and browser acceptance remain outstanding. Direct oracle resolution and collateral-funded payouts are implemented.
+For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs and reviewed participant controls; operational reconciliation and browser acceptance remain outstanding. Direct oracle resolution and collateral-funded payouts are implemented.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
 
 ## Planned capabilities
 
 - Price history and watchlists for community markets.
-- Portfolio valuation and live market updates.
-- Pending offline settlement requests and reservations.
+- Portfolio valuation and advanced market charts.
+- Pending incoming offline-credit requests.
 - Private notifications and deployment/backup verification.
 
 ## Next steps
 
-1. Add reliable automatic refresh and reconnect handling for markets and portfolios.
-2. Implement operator reconciliation and prove deployment, backups and recovery.
+1. Implement operator reconciliation (readiness item 5).
+2. Prove deployment, backups and recovery.
 3. Complete desktop/mobile/keyboard and pilot-load acceptance before real-money operation.
 
 Use synthetic data during development. Community trading tests should use explicitly created test markets; the seeded browsing examples are not tradable. Never commit credentials, real account information, payment records, exports, or agent instructions.

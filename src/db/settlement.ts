@@ -5,7 +5,7 @@ import { memberDatabase, readSession, requireMember } from "./members";
 import { recordMarketChange } from "./events";
 import { holdings, ledgerAccounts, marketPayouts, marketResolutions, markets, tradingOutbox } from "./schema";
 import { readPayoutHistory } from "./payout-history";
-import { lockTransactions } from "./transaction-lock";
+import { lockTransactions, type Transaction } from "./transaction-lock";
 import { finishOperation, move, transfer } from "./trading";
 
 // One bounded transaction per pass. Remaining shares are the durable work queue;
@@ -52,7 +52,7 @@ export async function payoutHistory(token: string, page: number) {
   }, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
-export async function publicResolution(marketId: string) {
-  const [resolution] = await memberDatabase().db.select({ result: marketResolutions.result, evidence: marketResolutions.evidence, createdAt: marketResolutions.createdAt }).from(marketResolutions).where(eq(marketResolutions.marketId, marketId));
+export async function publicResolution(marketId: string, snapshotTx?: Transaction) {
+  const [resolution] = await (snapshotTx ?? memberDatabase().db).select({ result: marketResolutions.result, evidence: marketResolutions.evidence, createdAt: marketResolutions.createdAt }).from(marketResolutions).where(eq(marketResolutions.marketId, marketId));
   return resolution ?? null;
 }

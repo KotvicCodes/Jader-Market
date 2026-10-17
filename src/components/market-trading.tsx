@@ -11,11 +11,9 @@ import { OpenOrderList } from "./open-order-list";
 
 type Snapshot = Awaited<ReturnType<typeof tradingSnapshot>>;
 
-export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, snapshot }: {
-  marketId: string; ownerId: string; csrf: string; closesAt: string; synthetic: boolean; snapshot: Snapshot;
+export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, snapshot, quoteKey = "" }: {
+  marketId: string; ownerId: string; csrf: string; closesAt: string; synthetic: boolean; snapshot: Snapshot; quoteKey?: string;
 }) {
-  const controller = useTradingRequest(ownerId, marketId, csrf);
-  const { locked, busy, refreshing, review, refresh, setReview, setMessage } = controller;
   const [action, setAction] = useState<Exclude<TradingAction, "cancel">>(synthetic ? "burn" : "place");
   const [duration, setDuration] = useState("GTC");
   const [deadlinePassed, setDeadlinePassed] = useState(false);
@@ -30,6 +28,8 @@ export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, sn
     return () => clearTimeout(timer);
   }, [closesAt]);
   const status = deadlinePassed && ["open", "paused"].includes(snapshot.status) ? "closed" : snapshot.status;
+  const controller = useTradingRequest(ownerId, marketId, csrf, JSON.stringify({ ...snapshot, status, quoteKey }));
+  const { locked, busy, refreshing, review, refresh, setReview, setMessage } = controller;
   const open = status === "open";
   const stock = (outcome: string) => snapshot.holdings.find(h => h.outcome === outcome) ?? { available: "0", reserved: "0" };
   const yes = BigInt(stock("YES").available);
@@ -58,8 +58,8 @@ export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, sn
     <section className="panel" aria-labelledby="trade-heading"><h2 id="trade-heading">Trade outcomes</h2>
       <p className="muted">Your real account credits and shares are used here. The practice demo has a separate balance.</p>
       <dl className="demo-summary"><div><dt>Available credits</dt><dd>{formatCredits(BigInt(snapshot.availableCredits))}</dd></div><div><dt>Reserved credits, all markets and withdrawals</dt><dd>{formatCredits(BigInt(snapshot.reservedCredits))}</dd></div></dl>
-      <p className="demo-hint muted">Balances and orders update after your actions. Use Refresh market to see other participants&apos; changes.</p>
-      <button type="button" className="secondary-button" disabled={busy || refreshing || Boolean(review)} onClick={refresh}>{refreshing ? "Refreshing…" : "Refresh market"}</button>
+      <p className="demo-hint muted">Balances and orders update automatically in active tabs. Check the live update status before trading; limit prices remain binding when depth changes.</p>
+      <button type="button" className="secondary-button" disabled={busy || refreshing || Boolean(review)} onClick={refresh}>{refreshing ? "Refreshing…" : "Refresh trading state"}</button>
       {synthetic && <p className="notice">Browsing example only. New orders and minting are disabled. Available legacy pairs can still be burned while open.</p>}
       {!open && <p className="notice">{status === "paused" ? "Trading is paused. You can still cancel open orders." : `This market is ${status}. New trades and complete-set operations are unavailable; any remaining open orders can be cancelled.`}</p>}
       {canUseTicket && <form className="member-form" aria-label="Trading ticket" onSubmit={prepare}>

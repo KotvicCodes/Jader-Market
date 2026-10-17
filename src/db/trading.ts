@@ -227,11 +227,11 @@ export async function expireTradingOrders() {
   });
 }
 
-export async function tradingSnapshot(token: string, inputMarketId: string, before?: string, beforeFill?: string) {
+export async function tradingSnapshot(token: string, inputMarketId: string, before?: string, beforeFill?: string, snapshotTx?: Transaction) {
   const marketId = marketUuid(inputMarketId);
   const cursor = before === undefined ? undefined : integerCursor(before);
   const fillCursor = beforeFill === undefined ? undefined : integerCursor(beforeFill);
-  return memberDatabase().db.transaction(async tx => {
+  const read = async (tx: Transaction) => {
     const session = await readSession(token, tx);
     requireMember(session);
     const [market] = await tx.select({ status: markets.status, paused: markets.paused, closesAt: markets.closesAt, synthetic: markets.synthetic }).from(markets).where(eq(markets.id, marketId));
@@ -247,7 +247,8 @@ export async function tradingSnapshot(token: string, inputMarketId: string, befo
       orderId: sql<string>`CASE WHEN ${fills.buyOrderId} IN (${ownOrders}) THEN ${fills.buyOrderId} ELSE ${fills.sellOrderId} END`,
     }).from(fills).where(and(eq(fills.marketId, marketId), or(inArray(fills.buyOrderId, ownOrders), inArray(fills.sellOrderId, ownOrders)), fillCursor ? lt(fills.sequence, fillCursor) : undefined)).orderBy(desc(fills.sequence)).limit(51);
     return { status: effectiveMarketStatus(market), availableCredits: (balances.find(a => a.kind === "wallet")?.balance ?? 0n).toString(), reservedCredits: balances.filter(a => ["reserved", "withdrawal_reserved"].includes(a.kind)).reduce((total, a) => total + a.balance, 0n).toString(), holdings: stock.map(h => ({ outcome: h.outcome, available: h.available.toString(), reserved: h.reserved.toString() })), openOrders: open.map(orderView), orders: history.slice(0, 50).map(orderView), fills: executions.slice(0, 50).map(fill => ({ ...fill, sequence: fill.sequence.toString(), price: fill.price.toString(), quantity: fill.quantity.toString(), createdAt: fill.createdAt.toISOString() })), nextFillCursor: executions.length > 50 ? executions[49].sequence.toString() : null, nextCursor: history.length > 50 ? history[49].sequence.toString() : null };
-  }, { isolationLevel: "repeatable read", accessMode: "read only" });
+  };
+  return snapshotTx ? read(snapshotTx) : memberDatabase().db.transaction(read, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
 
 function integerCursor(input: string) {
@@ -255,15 +256,16 @@ function integerCursor(input: string) {
   return BigInt(input);
 }
 
-export async function publicTradingSnapshot(inputMarketId: string, before?: string) {
+export async function publicTradingSnapshot(inputMarketId: string, before?: string, snapshotTx?: Transaction) {
   const marketId = marketUuid(inputMarketId);
   const cursor = before === undefined ? undefined : integerCursor(before);
-  return memberDatabase().db.transaction(async tx => {
+  const read = async (tx: Transaction) => {
     const [market] = await tx.select({ status: markets.status, paused: markets.paused, closesAt: markets.closesAt, synthetic: markets.synthetic }).from(markets).where(eq(markets.id, marketId));
     if (!market || market.status === "draft") throw new MemberError("market_missing", 404);
     const status = effectiveMarketStatus(market);
     const book = !["open", "paused"].includes(status) || market.synthetic === "yes" ? [] : await tx.select({ outcome: orders.outcome, side: orders.side, price: orders.price, quantity: sql<string>`sum(${orders.remaining})::text` }).from(orders).innerJoin(users, eq(users.id, orders.ownerId)).where(and(eq(orders.marketId, marketId), eq(orders.status, "open"), eq(users.suspended, false), or(isNull(orders.expiresAt), gt(orders.expiresAt, new Date())))).groupBy(orders.outcome, orders.side, orders.price).orderBy(asc(orders.outcome), asc(orders.side), sql`CASE WHEN ${orders.side} = 'buy' THEN -${orders.price} ELSE ${orders.price} END`);
     const history = await tx.select({ outcome: fills.outcome, price: fills.price, quantity: fills.quantity, sequence: fills.sequence, createdAt: fills.createdAt }).from(fills).where(and(eq(fills.marketId, marketId), cursor ? lt(fills.sequence, cursor) : undefined)).orderBy(desc(fills.sequence)).limit(51);
     return { status, executable: status === "open" && market.synthetic !== "yes", book: book.map(level => ({ ...level, price: level.price.toString() })), trades: history.slice(0, 50).map(fill => ({ ...fill, price: fill.price.toString(), quantity: fill.quantity.toString(), sequence: fill.sequence.toString(), createdAt: fill.createdAt.toISOString() })), nextCursor: history.length > 50 ? history[49].sequence.toString() : null };
-  }, { isolationLevel: "repeatable read", accessMode: "read only" });
+  };
+  return snapshotTx ? read(snapshotTx) : memberDatabase().db.transaction(read, { isolationLevel: "repeatable read", accessMode: "read only" });
 }
