@@ -13,6 +13,7 @@ describe("portable operator commands", () => {
     ["db:migrate", "Migration unavailable"],
     ["db:seed", "Synthetic seed unavailable"],
     ["worker", "Worker unavailable"],
+    ["db:runtime-grants", "Runtime grants failed"],
   ])("loads %s without a native transpiler and retains its safe setup guard", (name, message) => {
     const [, ...args] = scripts[name].split(" ");
     const result = spawnSync(process.execPath, args, { env: environment, encoding: "utf8", timeout: 10_000 });
@@ -28,6 +29,15 @@ describe("portable operator commands", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Native transpiler blocked by portability test.");
     expect(result.stderr).not.toContain("Administrator setup unavailable");
+  });
+
+  it("loads the private monitor without a native transpiler and reports a safe unavailable status", () => {
+    const [, ...args] = scripts["ops:check"].split(" ");
+    const result = spawnSync(process.execPath, args, { env: environment, encoding: "utf8", timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toEqual({ status: "critical", alerts: ["operations_unavailable"] });
   });
 
   it("loads reconciliation without a native transpiler and fails closed without database configuration", () => {

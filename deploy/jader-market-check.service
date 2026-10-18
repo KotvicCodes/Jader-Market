@@ -1,0 +1,14 @@
+[Unit]
+Description=Jader Market private deployment check
+OnFailure=jader-market-alert.service
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jader-market
+ExecStart=/usr/bin/docker compose --env-file /etc/jader-market/production.env -f deploy/compose.yaml exec -T app node -e "fetch('http://127.0.0.1:3000/api/ready',{signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ExecStart=/usr/bin/docker compose --env-file /etc/jader-market/production.env -f deploy/compose.yaml exec -T monitor npm run ops:check
+TimeoutStartSec=50
+StandardOutput=null
+StandardError=null
