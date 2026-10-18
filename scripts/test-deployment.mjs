@@ -53,7 +53,7 @@ try {
   stage = "owner migrations and runtime grants";
   compose(["run", "--rm", "-T", "migrate"]);
   stage = "synthetic participant setup";
-  const setup = `import { getDatabase } from './src/db/client'; import { hashPassword } from './src/domain/identity'; import { users } from './src/db/schema'; const c=getDatabase(); try { await c.db.insert(users).values({handle:'deployment_probe',passwordHash:await hashPassword('${password}')}); } finally { await c.client.end(); }`;
+  const setup = `import { getDatabase } from './src/db/client.ts'; import { hashPassword } from './src/domain/identity.ts'; import { users } from './src/db/schema.ts'; const c=getDatabase(); try { await c.db.insert(users).values({handle:'deployment_probe',passwordHash:await hashPassword('${password}')}); } finally { await c.client.end(); }`;
   compose(["run", "--rm", "-T", "migrate", "node", "--import", "./scripts/register-typescript.mjs", "--input-type=module", "-e", setup]);
   stage = "service startup";
   compose(["up", "-d", "--wait", "--wait-timeout", "90", "app", "worker", "monitor", "proxy"]);
@@ -88,7 +88,12 @@ try {
   console.info("Checking automatic worker restart after process exit.");
   stage = "automatic worker restart";
   const workerId = compose(["ps", "-q", "worker"]).trim();
-  run("docker", ["kill", "--signal", "KILL", workerId]);
+  // Kill the supervised process inside the namespace. Docker's own `kill`
+  // command counts as a manual stop and deliberately suppresses restarts.
+  const crash = spawnSync("docker", [...baseArgs, "exec", "-T", "worker", "node", "-e",
+    "const child=Number(require('node:fs').readFileSync('/proc/1/task/1/children','utf8').trim().split(' ')[0]); if(!child)process.exit(1); process.kill(child,'SIGKILL');"],
+    { encoding: "utf8", timeout: 10_000 });
+  assert.equal(crash.error, undefined);
   let restarted = false;
   for (let attempt = 0; attempt < 20; attempt++) {
     await delay(1000);
