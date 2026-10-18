@@ -23,6 +23,15 @@ export async function grantRuntimeRole(db: Database, role: string) {
     await tx.execute(sql`REVOKE CREATE ON SCHEMA public FROM PUBLIC`);
     await tx.execute(sql`GRANT USAGE ON SCHEMA public, drizzle TO ${ident}`);
     await tx.execute(sql`REVOKE ALL ON ALL TABLES IN SCHEMA public, drizzle FROM ${ident}`);
+    // Table-level REVOKE leaves independent column ACLs in place.
+    const columns = await tx.execute<{ schema: string; table: string; column: string }>(sql`
+      SELECT n.nspname AS schema, c.relname AS table, a.attname AS column
+      FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public', 'drizzle') AND a.attnum > 0
+        AND NOT a.attisdropped AND a.attacl IS NOT NULL`);
+    for (const column of columns) await tx.execute(sql`REVOKE ALL (${sql.identifier(column.column)})
+      ON TABLE ${sql.identifier(column.schema)}.${sql.identifier(column.table)} FROM ${ident}`);
     await tx.execute(sql`REVOKE ALL ON ALL SEQUENCES IN SCHEMA public, drizzle FROM ${ident}`);
     const select = ["markets", "users", "sessions", "rate_limits", "ledger_accounts", "journals", "ledger_entries", "admin_audit", "market_audit", "trading_operations", "holdings", "orders", "fills", "share_movements", "trading_outbox", "market_deadline_events", "market_resolutions", "market_payouts", "withdrawals", "withdrawal_operations"];
     for (const table of select) await tx.execute(sql`GRANT SELECT ON TABLE ${sql.identifier(table)} TO ${ident}`);
@@ -46,8 +55,10 @@ export async function assertRestrictedRole(db: Database) {
       WHERE n.nspname IN ('public', 'drizzle') AND c.relkind IN ('r', 'p')
         AND has_table_privilege(current_user, c.oid, 'TRUNCATE,TRIGGER'))
     AND NOT has_schema_privilege(current_user, 'public', 'CREATE')
+    AND NOT has_schema_privilege(current_user, 'drizzle', 'CREATE')
     AND NOT has_database_privilege(current_user, current_database(), 'CREATE')
     AND NOT has_database_privilege(current_user, current_database(), 'TEMP')
-    AND NOT has_table_privilege(current_user, 'drizzle.__drizzle_migrations', 'INSERT,UPDATE,DELETE,TRUNCATE')`);
+    AND NOT has_table_privilege(current_user, 'drizzle.__drizzle_migrations', 'INSERT,UPDATE,DELETE,TRUNCATE')
+    AND NOT has_any_column_privilege(current_user, 'drizzle.__drizzle_migrations', 'INSERT,UPDATE')`);
   if (rows.length !== 1) throw new Error("unsafe_runtime_role");
 }

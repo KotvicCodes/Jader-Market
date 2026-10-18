@@ -55,13 +55,13 @@ services:
       retries: 3
   worker:
     <<: *runtime
-    command: ["npm", "run", "worker"]
+    command: ["node", "--import", "./scripts/register-typescript.mjs", "scripts/worker.ts"]
     depends_on:
       db: {condition: service_healthy}
     volumes: ["worker-status:/var/lib/jader-worker"]
   monitor:
     <<: *runtime
-    command: ["npm", "run", "ops:check", "--", "--watch"]
+    command: ["node", "--import", "./scripts/register-typescript.mjs", "scripts/operations.ts", "--watch"]
     depends_on: [worker]
     volumes: ["worker-status:/var/lib/jader-worker:ro"]
     healthcheck:
@@ -82,6 +82,11 @@ services:
       - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
       - ${JADER_TLS_DIRECTORY:?Set absolute TLS certificate directory}:/etc/nginx/tls:ro
     networks: [edge, backend]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 networks:
   edge: {}
   backend: {internal: true}

@@ -17,10 +17,23 @@ const password = randomBytes(24).toString("hex");
 const port = 32000 + Math.floor(Math.random() * 20000);
 let stage = "certificate setup";
 const image = process.env.DEPLOYMENT_TEST_IMAGE ?? "jader-market:deployment-test";
+const syntheticEnvironment = {
+  JADER_HOST: "localhost", JADER_IMAGE: image,
+  JADER_BOOTSTRAP_PASSWORD: password,
+  JADER_OWNER_PASSWORD: randomBytes(24).toString("hex"),
+  JADER_RUNTIME_PASSWORD: randomBytes(24).toString("hex"),
+  AUTH_SECRET: randomBytes(32).toString("hex"), JADER_TLS_DIRECTORY: directory,
+};
+syntheticEnvironment.JADER_OWNER_DATABASE_URL = `postgresql://jader_owner:${syntheticEnvironment.JADER_OWNER_PASSWORD}@db:5432/jader_market`;
+syntheticEnvironment.JADER_RUNTIME_DATABASE_URL = `postgresql://jader_runtime:${syntheticEnvironment.JADER_RUNTIME_PASSWORD}@db:5432/jader_market`;
+// Compose gives the shell precedence over --env-file. Pin every deployment
+// setting for all subprocesses, including cleanup, and discard Compose defaults.
+const commandEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("COMPOSE_")));
+Object.assign(commandEnvironment, syntheticEnvironment);
 const baseArgs = ["compose", "--project-name", project, "--env-file", environmentFile,
   "-f", resolve("deploy/compose.yaml"), "-f", overrideFile];
 function run(command, args, input) {
-  const result = spawnSync(command, args, { input, encoding: "utf8", timeout: 300_000 });
+  const result = spawnSync(command, args, { input, env: commandEnvironment, encoding: "utf8", timeout: 300_000 });
   // Never print command output: it can include container environment and secrets.
   assert.equal(result.error, undefined, "Deployment command could not complete");
   assert.equal(result.status, 0, "Deployment command failed");
@@ -45,7 +58,7 @@ function request(path, body, headers = {}, tls = true) {
 try {
   run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
     "-keyout", join(directory, "privkey.pem"), "-out", join(directory, "fullchain.pem")]);
-  writeFileSync(environmentFile, `JADER_HOST=localhost\nJADER_IMAGE=${image}\nJADER_BOOTSTRAP_PASSWORD=${password}\nJADER_OWNER_PASSWORD=${password}\nJADER_RUNTIME_PASSWORD=${password}\nJADER_OWNER_DATABASE_URL=postgresql://jader_owner:${password}@db:5432/jader_market\nJADER_RUNTIME_DATABASE_URL=postgresql://jader_runtime:${password}@db:5432/jader_market\nAUTH_SECRET=${randomBytes(32).toString("hex")}\nJADER_TLS_DIRECTORY=${directory}\n`, { mode: 0o600 });
+  writeFileSync(environmentFile, Object.entries(syntheticEnvironment).map(([key, value]) => `${key}=${value}\n`).join(""), { mode: 0o600 });
   writeFileSync(overrideFile, `services:\n  proxy:\n    ports: !override ["127.0.0.1:${port}:443", "127.0.0.1:${port + 1}:80"]\n`, { mode: 0o600 });
   console.info("Checking isolated deployment initialization and migrations.");
   stage = "database initialization";
@@ -62,6 +75,7 @@ try {
   assert.equal(health.status, 200);
   assert.equal(JSON.parse(health.text).version, JSON.parse(readFileSync("package.json", "utf8")).version);
   assert.equal((await request("/api/ready")).status, 200);
+  assert.equal((await request("/api/health", null, { Host: "unexpected.invalid" })).status, 421);
   assert.match(health.headers["strict-transport-security"], /max-age=31536000/);
   const redirect = await request("/account", null, {}, false);
   assert.equal(redirect.status, 308); assert.equal(redirect.headers.location, "https://localhost/account");
@@ -85,6 +99,21 @@ try {
   }
   const [network] = JSON.parse(run("docker", ["network", "inspect", `${project}_backend`]));
   assert.equal(network.Internal, true);
+  console.info("Checking HTTPS recovery after the app changes its container address.");
+  stage = "app replacement behind a running proxy";
+  const [oldApp] = JSON.parse(run("docker", ["inspect", compose(["ps", "-q", "app"]).trim()]));
+  const oldAddress = oldApp.NetworkSettings.Networks[`${project}_backend`].IPAddress;
+  compose(["stop", "app"]);
+  compose(["rm", "-f", "app"]);
+  // Occupy the released address so this exercises DNS changes deterministically.
+  const holder = run("docker", ["run", "-d", "--rm", "--network", `${project}_backend`,
+    "--entrypoint", "node", image, "-e", "setInterval(()=>{},1000)"]).trim();
+  try {
+    compose(["up", "-d", "--no-deps", "--wait", "--wait-timeout", "60", "app"]);
+    const [newApp] = JSON.parse(run("docker", ["inspect", compose(["ps", "-q", "app"]).trim()]));
+    assert.notEqual(newApp.NetworkSettings.Networks[`${project}_backend`].IPAddress, oldAddress);
+    assert.equal((await request("/api/ready")).status, 200);
+  } finally { run("docker", ["rm", "-f", holder]); }
   console.info("Checking automatic worker restart after process exit.");
   stage = "automatic worker restart";
   const workerId = compose(["ps", "-q", "worker"]).trim();
@@ -92,20 +121,27 @@ try {
   // command counts as a manual stop and deliberately suppresses restarts.
   const crash = spawnSync("docker", [...baseArgs, "exec", "-T", "worker", "node", "-e",
     "const child=Number(require('node:fs').readFileSync('/proc/1/task/1/children','utf8').trim().split(' ')[0]); if(!child)process.exit(1); process.kill(child,'SIGKILL');"],
-    { encoding: "utf8", timeout: 10_000 });
+    { env: commandEnvironment, encoding: "utf8", timeout: 10_000 });
   assert.equal(crash.error, undefined);
   let restarted = false;
   for (let attempt = 0; attempt < 20; attempt++) {
     await delay(1000);
     const [worker] = JSON.parse(run("docker", ["inspect", workerId]));
-    if (worker.State.Running && worker.RestartCount >= 1) { restarted = true; break; }
+    if (worker.State.Running && worker.RestartCount >= 1) {
+      const heartbeat = JSON.parse(compose(["exec", "-T", "worker", "node", "-e",
+        "console.log(require('node:fs').readFileSync(process.env.WORKER_STATUS_FILE,'utf8'))"]));
+      if (heartbeat.checkedAt >= Date.parse(worker.State.StartedAt)) { restarted = true; break; }
+    }
   }
   assert.ok(restarted, "Worker must restart after an unexpected process exit");
   console.info("Checking worker loss alert and successful restart recovery.");
   stage = "worker-stop alert and restart";
   compose(["stop", "worker"]);
+  const [stoppedWorker] = JSON.parse(run("docker", ["inspect", workerId]));
+  assert.equal(stoppedWorker.State.ExitCode, 0, "SIGTERM must reach the worker and allow a clean exit");
+  assert.match(run("docker", ["logs", workerId]), /Trading maintenance completed\./);
   await delay(32_000);
-  const failedCheck = spawnSync("docker", [...baseArgs, "exec", "-T", "monitor", "npm", "run", "ops:check"], { encoding: "utf8", timeout: 30_000 });
+  const failedCheck = spawnSync("docker", [...baseArgs, "exec", "-T", "monitor", "npm", "run", "ops:check"], { env: commandEnvironment, encoding: "utf8", timeout: 30_000 });
   assert.equal(failedCheck.status, 1); assert.match(failedCheck.stdout, /worker_stale/);
   compose(["start", "worker"]);
   await delay(3000);
@@ -115,7 +151,7 @@ try {
   console.error(`Isolated deployment checks failed at ${stage}; output with secrets was suppressed.`);
   process.exitCode = 1;
 } finally {
-  const cleanup = spawnSync("docker", [...baseArgs, "down", "--volumes", "--remove-orphans"], { stdio: "ignore", timeout: 60_000 });
+  const cleanup = spawnSync("docker", [...baseArgs, "down", "--volumes", "--remove-orphans"], { env: commandEnvironment, stdio: "ignore", timeout: 60_000 });
   if (cleanup.status !== 0) { console.error(`Synthetic deployment cleanup failed: project ${project}.`); process.exitCode = 1; }
   rmSync(directory, { recursive: true, force: true });
 }

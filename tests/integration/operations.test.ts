@@ -58,6 +58,25 @@ describe("restricted production role and worker monitoring", () => {
       'CREATE OR REPLACE FUNCTION public.reject_record_change() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$',
     ]) await expect(runtime.client.unsafe(statement)).rejects.toThrow();
   });
+  it("detects and removes column grants that would allow migration-marker tampering", async () => {
+    await owner.client.unsafe(`GRANT UPDATE (hash) ON drizzle.__drizzle_migrations TO "${role}"`);
+    try {
+      await expect(assertRestrictedRole(runtime.db)).rejects.toThrow("unsafe_runtime_role");
+      await grantRuntimeRole(owner.db, role);
+      await expect(runtime.client.unsafe("UPDATE drizzle.__drizzle_migrations SET hash = hash")).rejects.toThrow();
+      await expect(assertRestrictedRole(runtime.db)).resolves.toBeUndefined();
+    } finally {
+      await owner.client.unsafe(`REVOKE UPDATE (hash) ON drizzle.__drizzle_migrations FROM "${role}"`);
+    }
+  });
+  it("rejects object creation in the migration schema", async () => {
+    await owner.client.unsafe(`GRANT CREATE ON SCHEMA drizzle TO "${role}"`);
+    try {
+      await expect(assertRestrictedRole(runtime.db)).rejects.toThrow("unsafe_runtime_role");
+    } finally {
+      await owner.client.unsafe(`REVOKE CREATE ON SCHEMA drizzle FROM "${role}"`);
+    }
+  });
   it("detects stalled settlement and expiry even while the worker heartbeat is healthy", async () => {
     // A disposable stopped-work fixture: keep constraint values realistic but
     // bypass financial triggers only while constructing the stalled queue.
