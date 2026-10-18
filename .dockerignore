@@ -11,3 +11,12 @@ logs
 *.log
 AGENTS.md
 CLAUDE.md
+**/.env*
+**/*.env
+**/*.pem
+**/*.key
+**/AGENTS.md
+**/CLAUDE.md
+.codex
+.claude
+.agents

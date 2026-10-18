@@ -31,6 +31,15 @@ describe("portable operator commands", () => {
     expect(result.stderr).not.toContain("Administrator setup unavailable");
   });
 
+  it("loads the private monitor without a native transpiler and reports a safe unavailable status", () => {
+    const [, ...args] = scripts["ops:check"].split(" ");
+    const result = spawnSync(process.execPath, args, { env: environment, encoding: "utf8", timeout: 10_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toEqual({ status: "critical", alerts: ["operations_unavailable"] });
+  });
+
   it("loads reconciliation without a native transpiler and fails closed without database configuration", () => {
     const [, ...args] = scripts.reconcile.split(" ");
     const result = spawnSync(process.execPath,args,{ env: environment,encoding: "utf8",timeout: 10_000 });

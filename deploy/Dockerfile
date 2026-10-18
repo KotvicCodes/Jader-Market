@@ -12,6 +12,7 @@ RUN npm run build
 FROM node:22.22.1-bookworm-slim AS runtime
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
+COPY --from=dependencies /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=build --chown=node:node /app /app
 RUN mkdir -p /var/lib/jader-worker && chown node:node /var/lib/jader-worker
 USER node
