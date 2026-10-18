@@ -5,9 +5,17 @@ import { totp } from '../../src/domain/identity';
 const password='fictional-acceptance-password-2026';
 test('administrator and two participants complete the fictional-credit pilot',async({browser},info)=>{
   const keyboard=info.project.name==='keyboard';
+  const touch=info.project.use.hasTouch===true;
+  let touchStarts=0;
   const pages:Page[]=[];const errors:string[]=[];
   const options={viewport:info.project.use.viewport,isMobile:info.project.use.isMobile,hasTouch:info.project.use.hasTouch,baseURL:process.env.ACCEPTANCE_ORIGIN,locale:'en-US'};
   const contexts=await Promise.all([browser.newContext(options),browser.newContext(options),browser.newContext(options)]);
+  if(touch)for(const context of contexts){
+    await context.exposeBinding('recordAcceptanceTouch',()=>{touchStarts++;});
+    await context.addInitScript(()=>document.addEventListener('touchstart',()=>{
+      void (window as unknown as {recordAcceptanceTouch:()=>Promise<void>}).recordAcceptanceTouch();
+    },{passive:true}));
+  }
   for(const context of contexts){context.setDefaultTimeout(15000);context.setDefaultNavigationTimeout(15000);}
   const phase=(text:string)=>console.info(`[${info.project.name}] ${text}`);
   const [admin,seller,buyer]=await Promise.all(contexts.map(context=>context.newPage()));
@@ -26,7 +34,7 @@ test('administrator and two participants complete the fictional-credit pilot',as
     }
     throw new Error(`Control cannot be reached by keyboard: ${await target.evaluate(node=>node.outerHTML)}; visited: ${[...visited].join(' | ')}`);
   }
-  async function click(target:Locator){if(keyboard){await reach(target);await target.page().keyboard.press('Enter');}else await target.click();}
+  async function click(target:Locator){if(keyboard){await reach(target);await target.page().keyboard.press('Enter');}else if(touch)await target.tap();else await target.click();}
   async function fill(target:Locator,value:string){
     if(keyboard){
       await reach(target);
@@ -44,7 +52,7 @@ test('administrator and two participants complete the fictional-credit pilot',as
     await target.page().keyboard.press('Home');for(let i=0;i<index;i++)await target.page().keyboard.press('ArrowDown');await target.page().keyboard.press('Tab');
     await expect(target).toHaveValue(value);
   }
-  async function check(target:Locator){if(keyboard){await reach(target);if(!await target.isChecked())await target.page().keyboard.press('Space');}else await target.check();}
+  async function check(target:Locator){if(keyboard){await reach(target);if(!await target.isChecked())await target.page().keyboard.press('Space');}else if(touch){if(!await target.isChecked())await target.tap();}else await target.check();await expect(target).toBeChecked();}
   async function audit(page:Page){
     expect((await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
@@ -133,5 +141,6 @@ test('administrator and two participants complete the fictional-credit pilot',as
     }
     await seller.goto('/account');await click(seller.getByRole('button',{name:'Sign out all sessions'}));await expect(seller.getByRole('heading',{name:'Sign in',exact:true})).toBeVisible();
     expect(errors).toEqual([]);
+    if(touch)expect(touchStarts).toBeGreaterThan(0);
   }finally{for(const page of pages)await page.context().close();}
 });

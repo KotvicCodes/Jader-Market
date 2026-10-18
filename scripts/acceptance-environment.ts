@@ -16,19 +16,38 @@ import { hashPassword } from '../src/domain/identity';
 import { readWorkerStatus } from '../src/domain/worker-status';
 
 export const syntheticPassword = 'fictional-acceptance-password-2026';
-export async function execute(command: string, args: string[], env = process.env, onOutput?: (text:string)=>void) {
-  const child = spawn(command, args, { env, stdio: ['ignore','pipe','ignore'] });
+const executing = new Set<ChildProcess>();
+const processGroups = new WeakSet<ChildProcess>();
+function managed(child: ChildProcess) {
+  if (process.platform !== 'win32') processGroups.add(child);
+  return child;
+}
+export async function execute(command: string, args: string[], env = process.env, onOutput?: (text:string)=>void, timeoutMs = 60000) {
+  const child = managed(spawn(command, args, { env, detached:process.platform !== 'win32', stdio: ['ignore','pipe','ignore'] }));
+  executing.add(child);
   let output = '';
-  child.stdout.on('data', chunk => { onOutput?.(chunk.toString());if (output.length < 1024*1024) output += chunk; });
-  const [code] = await once(child,'exit');
-  if (code !== 0) throw new Error('acceptance_subprocess_failed',{cause:output});
-  return output;
+  child.stdout!.on('data', chunk => { onOutput?.(chunk.toString());if (output.length < 1024*1024) output += chunk; });
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; void stop(child); }, timeoutMs);
+  try {
+    const [code] = await once(child,'close');
+    if (timedOut) throw new Error('acceptance_subprocess_timeout');
+    if (code !== 0) throw new Error('acceptance_subprocess_failed');
+    return output;
+  } finally { clearTimeout(timeout); executing.delete(child); }
 }
 async function stop(child?: ChildProcess) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  child.kill('SIGTERM');
-  const force = setTimeout(() => child.kill('SIGKILL'), 10000);
-  try { await once(child,'exit'); } finally { clearTimeout(force); }
+  const signal = (value:NodeJS.Signals) => {
+    try {
+      if (child.pid && processGroups.has(child)) process.kill(-child.pid,value);
+      else child.kill(value);
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+  };
+  const closed = once(child,'close');
+  signal('SIGTERM');
+  const force = setTimeout(() => signal('SIGKILL'), 10000);
+  try { await closed; } finally { clearTimeout(force); }
 }
 async function unusedPort() {
   const server = createServer(); server.listen(0,'127.0.0.1'); await once(server,'listening');
@@ -45,19 +64,40 @@ export async function startAcceptance() {
     !key.startsWith('COMPOSE_') && !key.startsWith('JADER_') && !key.startsWith('ACCEPTANCE_') && !['DATABASE_URL','TEST_DATABASE_URL','AUTH_SECRET','APP_ORIGIN','AUTH_TRUSTED_IP_HEADER','WORKER_STATUS_FILE'].includes(key))),NODE_ENV:'production' as const};
   let proxy:Server|undefined;
   let created = false, app: ChildProcess | undefined, worker: ChildProcess | undefined;
+  let interrupted=false;
+  const ensureActive=()=>{if(interrupted)throw new Error('acceptance_interrupted');};
   let connection: ReturnType<typeof createDatabase> | undefined;
-  const cleanup = async () => {
-    await stop(worker); await stop(app);
-    if(proxy){proxy.closeAllConnections();await new Promise<void>(resolve=>proxy!.close(()=>resolve()));}
-    await connection?.client.end();
-    if (created) await execute('docker',['rm','-fv',container],environment);
-    await rm(directory,{recursive:true,force:true});
+  let cleaning:Promise<void>|undefined;
+  const cleanup = () => cleaning ??= (async () => {
+    process.removeListener('SIGINT',onInterrupt); process.removeListener('SIGTERM',onTerminate);
+    const failures:unknown[]=[];
+    const attempt = async (work:()=>Promise<unknown>) => { try { await work(); } catch(error) { failures.push(error); } };
+    await Promise.all([...executing].map(child=>attempt(()=>stop(child))));
+    await Promise.all([attempt(()=>stop(worker)),attempt(()=>stop(app))]);
+    await attempt(async()=>{if(proxy){proxy.closeAllConnections();await new Promise<void>(resolve=>proxy!.close(()=>resolve()));}});
+    await attempt(async()=>{await connection?.client.end({timeout:5});});
+    // A signal can interrupt Docker after create succeeds but before it returns.
+    if(!created){
+      try {
+        const [info]=JSON.parse(await execute('docker',['inspect',container],environment));
+        created=info.Config.Labels?.['jader.synthetic']==='acceptance';
+      } catch { /* A create that never reached Docker has no container to remove. */ }
+    }
+    await attempt(async()=>{if(created)await execute('docker',['rm','-fv',container],environment);});
+    await attempt(()=>rm(directory,{recursive:true,force:true}));
+    if(failures.length)throw new Error('acceptance_cleanup_failed');
+  })();
+  const interrupt = (code:number) => {
+    interrupted=true;
+    void cleanup().then(()=>process.exit(code),()=>process.exit(1));
   };
+  const onInterrupt=()=>interrupt(130),onTerminate=()=>interrupt(143);
+  process.once('SIGINT',onInterrupt); process.once('SIGTERM',onTerminate);
   try {
     await execute('docker',['create','--name',container,'--label','jader.synthetic=acceptance',
       '-e','POSTGRES_USER=jader','-e',`POSTGRES_PASSWORD=${dbPassword}`,'-e','POSTGRES_DB=jader_acceptance_test',
       '-p','127.0.0.1::5432','postgres:17.6-alpine'],environment);
-    created = true; await execute('docker',['start',container],environment);
+    created = true; ensureActive(); await execute('docker',['start',container],environment);
     const binding = (await execute('docker',['port',container,'5432/tcp'],environment)).trim();
     if (!/^127\.0\.0\.1:\d+$/.test(binding)) throw new Error('private_port_required');
     const ownerUrl = `postgresql://jader:${dbPassword}@${binding}/jader_acceptance_test`;
@@ -78,17 +118,21 @@ export async function startAcceptance() {
     }
     const runtimeUrl = `postgresql://jader_runtime:${runtimePassword}@${binding}/jader_acceptance_test`;
     const port = await unusedPort(), origin = `http://localhost:${port}`;
+    ensureActive();
     let appPort=0;
     proxy=createProxy((request,response)=>{
       const upstream=upstreamRequest({hostname:'127.0.0.1',port:appPort,path:request.url,method:request.method,headers:{...request.headers,host:`localhost:${port}`,'x-acceptance-client-ip':request.socket.remoteAddress??'127.0.0.1'}},result=>{
         response.writeHead(result.statusCode??502,result.headers);result.pipe(response);
       });
-      upstream.on('error',()=>{response.writeHead(503);response.end();});request.pipe(upstream);
+      upstream.on('error',()=>{if(!response.headersSent)response.writeHead(503);response.end();});
+      response.on('close',()=>{if(!response.writableFinished)upstream.destroy();});request.pipe(upstream);
     });
     proxy.listen(port,'127.0.0.1');await once(proxy,'listening');appPort=await unusedPort();
+    ensureActive();
     const runtimeEnvironment = { ...environment, DATABASE_URL:runtimeUrl, AUTH_SECRET:authSecret,APP_ORIGIN:origin,AUTH_TRUSTED_IP_HEADER:'x-acceptance-client-ip',
       WORKER_STATUS_FILE:join(directory,'worker-status.json'),NEXT_TELEMETRY_DISABLED:'1',TMPDIR:directory };
-    app = spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',String(appPort)],{env:runtimeEnvironment,stdio:'ignore'});
+    app = managed(spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',String(appPort)],{env:runtimeEnvironment,detached:process.platform !== 'win32',stdio:'ignore'}));
+    app.on('error',()=>{});
     for (let i=0;i<100;i++) {
       if (app.exitCode !== null) throw new Error('application_stopped');
       try { const r=await fetch(`${origin}/api/ready`,{signal:AbortSignal.timeout(1000)}); if (r.ok) break; } catch {}
@@ -96,8 +140,9 @@ export async function startAcceptance() {
       await delay(200);
     }
     const startWorker = () => {
+      ensureActive();
       if (worker && worker.exitCode === null && worker.signalCode === null) throw new Error('worker_already_started');
-      worker=spawn(process.execPath,['--import','./scripts/register-typescript.mjs','scripts/worker.ts'],{env:runtimeEnvironment,stdio:'ignore'});
+      worker=managed(spawn(process.execPath,['--import','./scripts/register-typescript.mjs','scripts/worker.ts'],{env:runtimeEnvironment,detached:process.platform !== 'win32',stdio:'ignore'}));
       worker.on('error',()=>{});
     };
     const restartWorker = async () => {
@@ -113,6 +158,7 @@ export async function startAcceptance() {
       }
       throw new Error('restarted_worker_unavailable');
     };
+    ensureActive();
     return {directory,container,connection,origin,port,ownerUrl,runtimeUrl,authSecret,runtimeEnvironment,environment,
       startWorker,restartWorker,stopWorker:()=>stop(worker),cleanup};
   } catch (error) { await cleanup(); throw error; }

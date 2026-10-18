@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import { eq } from 'drizzle-orm';
 import { startAcceptance } from './acceptance-environment';
+import { lockWaitBounds } from './acceptance-metrics';
 import { getDatabase } from '../src/db/client';
 import { adjustCredits } from '../src/db/members';
 import { mutateTrading } from '../src/db/trading';
@@ -88,8 +89,9 @@ try{
       const response=await fetch(`${env!.origin}${path}`,{method:body?'POST':'GET',signal:AbortSignal.timeout(10000),headers:{Cookie:`jader_session=${actor.token}; jader_csrf=${actor.csrf}`,
         ...(body?{'Content-Type':'application/json',Origin:env!.origin,'X-CSRF-Token':actor.csrf,'X-Account-ID':actor.id}:{})},body:body?JSON.stringify(body):undefined});
       await response.arrayBuffer();if(!response.ok)throw new Error('unexpected_http_status');
-      (body?writes:reads).push(performance.now()-started);if(body)measuredWrites++;
+      if(body)measuredWrites++;
     }catch{unexpectedErrors++;}
+    finally{(body?writes:reads).push(performance.now()-started);}
   };
   const started=performance.now();
   // Ten concurrent virtual users rotate over all twenty participants. Each performs
@@ -111,22 +113,23 @@ try{
   const [payouts]=await client`SELECT count(*)::int AS count FROM market_payouts WHERE resolution_id IN (SELECT id FROM market_resolutions WHERE market_id=${settling.id})`;
   const [state]=await client`SELECT status FROM markets WHERE id=${settling.id}`;
   const [expired]=await client`SELECT status FROM orders WHERE id=${(expiring.order as {id:string}).id}`;
-  const maxSamplingGapMs=Math.max(0,...sampleTimes.slice(1).map((at,index)=>at-sampleTimes[index]));
-  const clockDriftMs=Math.max(0,...sampleTimes.map((at,index)=>Math.abs((at-sampleTimes[0])-(monotonicSampleTimes[index]-monotonicSampleTimes[0]))));
-  const lockWaitUpperBoundMs=Math.max(...lockSamples)+maxSamplingGapMs;
+  const {maxObservedLockWaitMs,maxSamplingGapMs,clockDriftMs,lockWaitUpperBoundMs}=lockWaitBounds(lockSamples,sampleTimes,monotonicSampleTimes);
   const before=await client`SELECT count(*)::int AS count FROM market_payouts`;
   await env.restartWorker();
   const after=await client`SELECT count(*)::int AS count FROM market_payouts`;
   const workerRestartNoDuplicates=before[0].count===after[0].count;
   const [finalFills]=await client`SELECT count(*)::int AS count FROM fills`;
+  const activeHoldings=await client<{outcome:string;quantity:string}[]>`SELECT outcome,sum(available+reserved)::text AS quantity FROM holdings WHERE market_id=${active.id} GROUP BY outcome ORDER BY outcome`;
+  const [activeMints]=await client`SELECT count(*)::int AS count FROM trading_operations WHERE market_id=${active.id} AND action='mint'`;
+  const financialWritesApplied=activeMints.count===70&&activeHoldings.length===2&&activeHoldings.every(row=>row.quantity==='1060');
   const results={generatedAt:new Date().toISOString(),applicationVersion:version.version,profile,environment:{platform:process.platform,architecture:process.arch,node:process.version,logicalCpus:cpus().length,memoryBytes:totalmem()},
     durationMs:Math.round(elapsedMs),readRequests:reads.length,writeRequests:writes.length,unexpectedErrors,samplingErrors,
-    p95ReadMs:Math.round(percentile(reads,.95)),p95WriteMs:Math.round(percentile(writes,.95)),maxObservedLockWaitMs:Math.round(Math.max(0,...lockSamples)),maxSamplingGapMs:Math.round(maxSamplingGapMs),clockDriftMs:Math.round(clockDriftMs),lockWaitUpperBoundMs:Math.round(lockWaitUpperBoundMs),
+    p95ReadMs:Math.round(percentile(reads,.95)),p95WriteMs:Math.round(percentile(writes,.95)),maxObservedLockWaitMs:Math.round(maxObservedLockWaitMs),maxSamplingGapMs:Math.round(maxSamplingGapMs),clockDriftMs:Math.round(clockDriftMs),lockWaitUpperBoundMs:Math.round(lockWaitUpperBoundMs),
     maxObservedWorkerLagMs:Math.round(Math.max(0,...workerSamples)),maxObservedSettlementLagMs:Math.round(Math.max(0,...settlementSamples)),maxObservedExpiryLagMs:Math.round(Math.max(0,...expirySamples)),lockSamples:lockSamples.length,
-    payoutReceipts:payouts.count,finalFills:finalFills.count,workerRestartNoDuplicates,reconciliation:report.status,
+    payoutReceipts:payouts.count,finalFills:finalFills.count,activeMintOperations:activeMints.count,activeHoldings,financialWritesApplied,workerRestartNoDuplicates,reconciliation:report.status,
     passed:clockDriftMs<1000&&unexpectedErrors===0&&samplingErrors===0&&reads.length===1200&&measuredWrites===120&&lockSamples.length>0&&workerSamples.length>0&&
       percentile(reads,.95)<profile.p95ReadMs&&percentile(writes,.95)<profile.p95WriteMs&&lockWaitUpperBoundMs<profile.maxLockWaitMs&&
-      Math.max(...workerSamples,...settlementSamples,...expirySamples)<profile.maxWorkerLagMs&&expired.status==='expired'&&state.status==='void'&&payouts.count===40&&finalFills.count===1060&&workerRestartNoDuplicates&&report.status==='pass'};
+      Math.max(...workerSamples,...settlementSamples,...expirySamples)<profile.maxWorkerLagMs&&expired.status==='expired'&&state.status==='void'&&payouts.count===40&&finalFills.count===1060&&financialWritesApplied&&workerRestartNoDuplicates&&report.status==='pass'};
   await writeFile('.cache/load-acceptance.json',JSON.stringify(results,null,2)+'\n',{mode:0o600});
   console.info(JSON.stringify(results,null,2));assert.equal(results.passed,true,'Pilot load thresholds must all pass');
 }catch{console.error(`Pilot load acceptance failed at ${stage}.`);process.exitCode=1;}

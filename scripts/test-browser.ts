@@ -10,7 +10,7 @@ try {
     console.info(`Synthetic browser rehearsal: ${environment.origin}/account; handle preview_admin; password fictional-acceptance-password-2026`);
     await new Promise<void>(resolve=>{process.once('SIGTERM',resolve);process.once('SIGINT',resolve);});
   } else {
-    await execute(process.execPath,['node_modules/@playwright/test/cli.js','test',...process.argv.slice(2)],{...environment.environment,ACCEPTANCE_ORIGIN:environment.origin},text=>process.stdout.write(text));
+    await execute(process.execPath,['node_modules/@playwright/test/cli.js','test',...process.argv.slice(2)],{...environment.environment,ACCEPTANCE_ORIGIN:environment.origin},text=>process.stdout.write(text),600000);
     const before=await environment.connection.client`SELECT count(*)::int AS count FROM market_payouts`;
     await environment.restartWorker();
     const after=await environment.connection.client`SELECT count(*)::int AS count FROM market_payouts`;
