@@ -1,0 +1,90 @@
+# Protected backups and recovery — readiness item 7
+
+Version 0.1.14 supplies scheduled encrypted logical backups, independent-copy verification, freshness checks and a restore command that creates a fresh isolated PostgreSQL environment. The synthetic rehearsal proves matching MFA keys, revoked sessions, exact financial history, collateral, order/withdrawal reservations and completion of interrupted payouts without duplicates. **Production acceptance still requires installing the timers, testing the actual off-host destination/key custody/alerts, measuring recovery time and rehearsing on the intended host.** No production data or external payments are used by the automated drill.
+
+## Custody and prerequisites
+
+Use the deployment layout in [production operations](PRODUCTION_DEPLOYMENT.md), Node 22.22.1, Docker/Compose, PostgreSQL 17.6 and a dedicated trusted Linux operator account. Run commands from the pinned release checkout at `/opt/jader-market`. Docker access is root-equivalent. The backup command reads only its explicit environment file and Compose project; ambient Compose/Jader environment variables cannot override those settings. It dumps `jader_market` as `jader_owner` from that project's database container. There is no arbitrary source URL.
+
+Provision these directories as mode 0700 and files as mode 0600, owned by the operator running the commands:
+
+- `/etc/jader-market/production.env`: original matching `AUTH_SECRET` and the production deployment settings. Keep the environment outside git, images, logs and tickets.
+- `/etc/jader-market/backup.key`: **a separate** randomly generated 32-byte AES key, encoded as 64 lowercase hex characters. Generate it once using `umask 077; openssl rand -hex 32 > /etc/jader-market/backup.key` on the trusted host. Preserve two verified copies in independently controlled offline/off-host key custody before scheduling backups. Record the custodian and archive date ranges each key unlocks. A backup encryption key is not a replacement for `AUTH_SECRET`.
+- `/var/backups/jader-market`: protected local encrypted archives and aggregate freshness marker.
+- `/var/lib/jader-recovery`: protected parent directory for fresh recovery environments. Use an encrypted local filesystem for recovery staging and credentials. File deletion does not guarantee forensic erasure on SSDs, snapshots or unencrypted storage.
+
+The archive encrypts the custom-format `pg_dump` stream **and** metadata including the exact authentication key, backup start time, PostgreSQL version, release reference and immutable local image ID. AES-256-GCM uses a fresh random nonce and authenticates the header and entire payload. Normal backup never writes a plaintext dump. A failed dump never becomes a published archive. Restore authenticates the entire archive in a private staging file before executing any SQL; failed staging is deleted. Disk space must accommodate the encrypted archive, decrypted staging and restored database, plus PostgreSQL overhead.
+
+Keep the backup key separately from the archive store, with access restricted to recovery custodians. Also escrow the original `AUTH_SECRET` separately through the organization's private secret custody process; the encrypted archive includes it so the database/key pair travel together. Losing both copies of the backup key makes these archives unrecoverable. Do not regenerate `AUTH_SECRET` during recovery: it encrypts stored MFA secrets and keys rate-limit identifiers. Key rotation needs its own reviewed re-encryption procedure. When rotating the backup key, preserve older keys until every corresponding retained archive expires and passes a new-key restore drill.
+
+Archive the exact release source and runnable image off-host too, outside the private database archive. Prefer `JADER_IMAGE` as a registry digest. The backup records Docker's immutable image ID; recovery refuses a tag that now resolves to a different ID. On a replacement host, load the preserved image or pull the recorded digest before restore. Do not rebuild an old source revision and assume it is byte-identical. Retain images/keys for every retained backup. Production image publication/export and registry credentials follow your release process.
+
+## Schedule, replication, retention and alerts
+
+Install a root-owned mode-0700 `/usr/local/sbin/jader-market-backup-copy`. It receives one absolute encrypted archive path, returns zero only after a durable independent copy and verification, and must handle retries of the same filename safely. It must never copy the backup key. [The rclone example](../deploy/backup-copy.example.sh) copies an immutable object and reads every encrypted byte back for comparison. Install rclone separately; create mode-0600 `/etc/jader-market/rclone.conf` and `backup-copy.env`, the latter defining a dedicated `JADER_BACKUP_REMOTE`. Restrict credentials to this prefix and apply remote retention/object-lock policy separately. Verify that the destination is on an independent host/storage account and survives loss of this Docker host. The automated test uses a synthetic local second copy; that tests the hook contract, not production storage independence.
+
+Run the first backup and check freshness privately:
+
+```sh
+node scripts/backup.mjs backup \
+  --env-file /etc/jader-market/production.env --project jader-production \
+  --key /etc/jader-market/backup.key --directory /var/backups/jader-market \
+  --replicate /usr/local/sbin/jader-market-backup-copy
+node scripts/backup.mjs status --directory /var/backups/jader-market
+```
+
+All failures return exit 1 with generic output; inspect sensitive details only through trusted operator tooling. Never publish resolved Compose settings, database errors, environment contents or decrypted archives. Dump/copy subprocesses are bounded to 30 minutes each; the host backup service has a two-hour limit. A `.backup-lock` prevents overlapping runs. An interrupted process/host can leave a lock or `.partial` file: confirm that the service and all its Docker/dump/copy subprocesses have stopped, preserve the last successful archive, then remove only those stale files privately. Never remove a live lock to force a second backup.
+
+Install `deploy/jader-market-backup{,-check}.{service,timer}` and `deploy/jader-market-alert.service` under `/etc/systemd/system/`, then run `systemctl daemon-reload` and `systemctl enable --now jader-market-backup.timer jader-market-backup-check.timer`. Confirm `/usr/bin/node` is the pinned supported Node binary. Units run under root by default, matching the protected directories; a dedicated operator needs equivalent Docker/file privileges and consistent ownership. The timer runs daily at 02:00 UTC, with up to five minutes of jitter and a catch-up run after downtime. Freshness runs hourly and fails when no verified replicated success exists, the latest archive is missing, the marker is malformed/future-dated or the success is older than 26 hours. A failed copy leaves the encrypted local archive but does not advance freshness or prune old backups.
+
+Local retention preserves all snapshots younger than 30 days and at least the seven newest snapshots. Retention runs only after successful replication; failed/unreplicated snapshots and partials may accumulate, so monitor free space and investigate failures. The remote store needs its own reviewed 30-day-or-longer policy and immutable recovery generations; the backup command never deletes remote evidence. Record successful backup/copy timestamps in the private incident record. Daily snapshots imply up to roughly 24 hours of data loss between scheduled successes; a freshness alarm can mean a longer gap. This is not point-in-time recovery. Choose a stricter schedule or design WAL archiving before accepting a smaller recovery point objective.
+
+`OnFailure` invokes the existing local critical logger unit. Connect that signal to an **external** on-call destination and an independent dead-man/freshness monitor, so a dead host, disabled timer or lost network is detectable. Test copy failure, deleted/missing archives, expired freshness, disk exhaustion and the entire host being unavailable. A local logger alone does not establish alert delivery. Restore time is measured in the host rehearsal; no production recovery-time promise is inferred from CI.
+
+## Isolated restore and verification
+
+Stop and fence the old deployment before considering cutover, but preserve it as incident evidence. Copy a retained encrypted archive from off-host custody to private storage on the recovery host. Obtain its matching backup key through the separate custodian and ensure the recorded release image is present. Restore with a new directory name:
+
+```sh
+node scripts/backup.mjs restore \
+  --archive /var/backups/jader-market/backup-RECORDED-TIMESTAMP-RECORDED-ID.jmb \
+  --key /etc/jader-market/backup.key \
+  --output /var/lib/jader-recovery/incident-2026-10-18
+```
+
+Use the actual archive filename; the placeholder above is not literal. The output directory must not exist and its parent must be private. There is **no live target URL, overwrite, schema-clean or production-start option**. The command authenticates the archive, checks the release identity, creates a random `jader-recovery-*` container with `--network none` and no published ports, initializes fresh owner/runtime/bootstrap passwords, restores in one transaction under `jader_owner`, reapplies reviewed runtime grants from the saved release and runs read-only accounting and key checks as `jader_runtime`. It does not run migrations, a web server, a worker or external payments. Failed restores remove only their own container and anonymous data volume. A force-killed command/host can leave an isolated container/staging directory: identify the exact incident directory/container before cleanup; do not prune all Docker volumes.
+
+Recovery checks cover database readiness/guards, ledger and holding projections, collateral, open-order and withdrawal reservations, fills, resolutions and recorded payout progress through the reconciliation command. They decrypt every enrolled MFA secret and pending enrollment with the saved key. Accounting/MFA failure keeps recovery failed. These checks produce only aggregate status, not private receipts or identifiers.
+
+After validation, **all restored sessions are deleted**. Old cookies, including previously revoked sessions resurrected by an older snapshot, must fail. Users sign in again; MFA enrollment and replay-counter state remain from the snapshot, so clock synchronization and fresh TOTP codes are required. Pending MFA enrollments disappear with their revoked sessions and can be restarted after sign-in. Password changes, MFA changes, suspension and other security decisions after the snapshot may have been lost: independently reapply them or require account credential recovery before reopening. Never reset MFA merely to make verification pass.
+
+The new private directory contains `restore.json` (container/release identity and verification state), `recovery.env` (fresh DB credentials and matching authentication key), `owner.env` and `runtime.env` (loopback URLs usable only from that container's network namespace). Do not paste these into chat. To run further tools without exposing ports, use the recorded container name and exact release image:
+
+```sh
+docker run --rm --network container:RECORDED_CONTAINER \
+  --env-file /var/lib/jader-recovery/incident-2026-10-18/runtime.env \
+  --mount type=bind,src=/private/verified-receipts.json,dst=/run/receipts.json,readonly \
+  RECORDED_RELEASE_IMAGE node --import ./scripts/register-typescript.mjs \
+  scripts/reconcile.ts --external-register /run/receipts.json
+```
+
+The independent register must include transfers **after the snapshot too**. An already-sent payment missing from the restored application must fail reconciliation and remain an exception until reviewed recovery records it exactly once. Read [operator reconciliation](OPERATOR_RECONCILIATION.md) before any payment decision. Internal verification always reports external payments unchecked; it never authorizes payments or a cutover. Do not resend an external transfer because its application confirmation disappeared.
+
+## Incident response and controlled cutover
+
+1. Declare the incident and stop external payments/credit issuance. Fence traffic and stop the app/worker (for example `dc stop proxy app worker monitor` using the production runbook's explicit Compose file/environment). Ensure the old host cannot restart processing after a reboot or network recovery. Save immutable evidence: affected release, original volume/snapshot, protected environment, logs, independent payment register and last known good backup. Do not overwrite the damaged source.
+2. Select a known-good backup and restore through the isolated command. Record backup start, last replicated success, incident time, estimated lost writes and actual time to verified recovery. An authenticated archive proves custody/integrity, not that the source state was correct.
+3. Reconcile the restored state with independently verified external receipts and operational/security actions since the backup. Resolve uncertain processing withdrawals before releasing reservations. Reconstruct lost actions only through a reviewed, idempotent application/forward-repair procedure, with original operation IDs and receipts where available. Never directly update balances, rewrite journals, disable guards or manufacture balancing evidence.
+4. Rehearse the repaired state with a separate synthetic copy: reservations remain backed, existing receipts remain unchanged, and repeated worker passes complete only outstanding entitlements. CI proves this for a snapshot taken after 20 of 22 holding payouts; it also tests wrong keys, corruption, failed SQL restore, mismatched `AUTH_SECRET`, failed replication, freshness and overwrite refusal. Run `npm run test:recovery` against the built release; it creates and cleans only synthetic resources.
+5. Record a complete external reconciliation pass and an explicit operator cutover decision. Select one fenced, fresh production stack; copy the isolated database into that **new empty** stack using a separately reviewed private dump/restore, preserving `jader_owner` ownership and the original `AUTH_SECRET`. Use the fresh target credentials and exact verified image; never point this CLI at a live target. Reapply runtime grants, revoke sessions again after any transfer, rerun reconciliation, key checks and deployment acceptance before enabling traffic. Keep workers stopped until repair and payment review are complete, then start one worker and verify progress and reconciliation once more. Prevent both old and new stacks from processing.
+6. Preserve the incident evidence and prior stack privately until sign-off. Clean an abandoned isolated environment only with its exact manifest container (`docker rm -fv RECORDED_CONTAINER`) and its own private directory after evidence retention approval. Record root cause, lost/recovered actions, reconciliation reports, operator decision and follow-up prevention.
+
+## Migration failure and forward repair
+
+Before each migration, verify a fresh replicated backup and run an isolated restore with its preserved pre-migration release. Stop traffic and the worker and stop the backup timer/service for the upgrade window so a scheduled snapshot cannot pair a changing schema with the wrong release; save the migration source and prior image. Apply migrations as `jader_owner`, then runtime grants. A nonzero migration/grant result leaves the release stopped: do not automatically bring the new app up, assume a down migration exists, or edit Drizzle's migration journal.
+
+Privately inspect which migration transaction committed, the schema and `drizzle.__drizzle_migrations`, and compare with the committed migration files. PostgreSQL transactional DDL often rolls back a failed transaction, but inspect state rather than assuming every statement/tool is atomic. If a transaction rolled back cleanly and the old schema is intact, the old release can resume only after readiness, key and complete reconciliation checks plus an operator decision. Do not run an old binary against a partially upgraded schema.
+
+For a committed incompatible change or data defect, write a **new**, reviewed forward migration using the repository's migration workflow (`npm run db:generate` where applicable); never change an already-applied migration or remove its marker. Preserve immutable financial records. Restore the pre-change backup in isolation, reproduce the failed upgrade, apply the proposed forward change and grants, and repeat readiness/reconciliation plus resumable-payout verification. If data correction needs a compensating business operation, specify its operation key, evidence, guard constraints and idempotency separately, and test it against a disposable copy. Stop if safe compensation cannot be demonstrated. Review the exact SQL and production run sequence before applying it to the fenced target.
+
+A database rollback by restoration is a separate incident decision: it loses post-snapshot state, can resurrect security decisions and can forget externally sent payments. Use the full incident procedure above, never an automatic rollback hook. Record migration outcome, before/after schema versions, preserved image identity, verified receipts and the explicit resume decision. Update the explicit environment to the accepted immutable release image, re-enable the backup timer, take a fresh backup and rehearse its restore.

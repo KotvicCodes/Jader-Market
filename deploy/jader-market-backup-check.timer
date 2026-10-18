@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Jader Market backup freshness hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Unit=jader-market-backup-check.service
+
+[Install]
+WantedBy=timers.target

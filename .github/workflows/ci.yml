@@ -53,3 +53,4 @@ jobs:
       - run: npm run test:http
       - run: docker build -f deploy/Dockerfile -t jader-market:deployment-test .
       - run: npm run test:deployment
+      - run: npm run test:recovery

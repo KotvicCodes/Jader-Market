@@ -2,7 +2,7 @@
 
 This is a repeatable single-host Linux deployment for the binary-market prototype. It runs a production Next.js artifact, PostgreSQL, a supervised worker, a private monitor and an HTTPS reverse proxy. Only the proxy publishes ports. The app/worker use `jader_runtime`; schema migration uses a separate `jader_owner`. Neither is a superuser. The bootstrap database account is confined to the database service and trusted-host maintenance.
 
-This implements the deployment tooling and local verification for checklist item 6. **The actual host, public certificate/DNS, firewall, alert delivery and operator rehearsal still need acceptance before a pilot.** A local self-signed certificate check cannot certify the target host. Protected backups and an isolated database-plus-key restore are the separate item 7 gate; browser/load acceptance is item 8. Do not infer their completion from this deployment.
+This implements the deployment tooling and local verification for checklist item 6. **The actual host, public certificate/DNS, firewall, alert delivery and operator rehearsal still need acceptance before a pilot.** A local self-signed certificate check cannot certify the target host. Protected backups and an isolated database-plus-key restore are provided by the [item 7 recovery runbook](BACKUP_RECOVERY.md), with production custody/scheduling acceptance still required; browser/load acceptance is item 8. Do not infer their completion from this deployment.
 
 ## Prepare a host
 

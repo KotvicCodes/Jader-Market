@@ -127,7 +127,7 @@ Add process restart supervision, last-success/oldest-pending indicators, and ale
 
 Admin key preservation and host recovery are implemented and tested. They do not replace restoring a production database and its matching `AUTH_SECRET` after host loss.
 
-Provide scheduled encrypted backups, protected key custody, a retention policy, an isolated restore drill and migration failure/forward-repair instructions. Verify restored sessions/MFA behavior, ledger projections, collateral, reservations and payout progress. Database commit-time guards and test assertions exist. Version 0.1.12 adds a read-only reconciliation command, independent external receipt matching and the [operator response procedure](OPERATOR_RECONCILIATION.md). Deployment and a restore rehearsal remain pending.
+Provide scheduled encrypted backups, protected key custody, a retention policy, an isolated restore drill and migration failure/forward-repair instructions. Verify restored sessions/MFA behavior, ledger projections, collateral, reservations and payout progress. Database commit-time guards and test assertions exist. Version 0.1.12 adds a read-only reconciliation command, independent external receipt matching and the [operator response procedure](OPERATOR_RECONCILIATION.md). Version 0.1.14 adds [protected backups, isolated restore verification and incident/forward-repair procedures](BACKUP_RECOVERY.md), with a successful synthetic database-plus-key rehearsal. Actual-host scheduling, independent storage/key custody and recovery-time acceptance remain pending.
 
 ### Offline payments require additional control before real-value use
 

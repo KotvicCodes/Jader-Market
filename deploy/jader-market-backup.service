@@ -1,0 +1,14 @@
+[Unit]
+Description=Encrypted Jader Market backup and off-host replication
+OnFailure=jader-market-alert.service
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jader-market
+UMask=0077
+ExecStart=/usr/bin/node scripts/backup.mjs backup --env-file /etc/jader-market/production.env --project jader-production --key /etc/jader-market/backup.key --directory /var/backups/jader-market --replicate /usr/local/sbin/jader-market-backup-copy
+TimeoutStartSec=2h
+StandardOutput=null
+StandardError=null

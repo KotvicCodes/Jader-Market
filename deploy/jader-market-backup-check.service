@@ -1,0 +1,11 @@
+[Unit]
+Description=Check replicated Jader Market backup freshness
+OnFailure=jader-market-alert.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jader-market
+ExecStart=/usr/bin/node scripts/backup.mjs status --directory /var/backups/jader-market
+TimeoutStartSec=30
+StandardOutput=null
+StandardError=null
