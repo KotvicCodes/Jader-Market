@@ -13,6 +13,7 @@ describe("portable operator commands", () => {
     ["db:migrate", "Migration unavailable"],
     ["db:seed", "Synthetic seed unavailable"],
     ["worker", "Worker unavailable"],
+    ["db:runtime-grants", "Runtime grants failed"],
   ])("loads %s without a native transpiler and retains its safe setup guard", (name, message) => {
     const [, ...args] = scripts[name].split(" ");
     const result = spawnSync(process.execPath, args, { env: environment, encoding: "utf8", timeout: 10_000 });

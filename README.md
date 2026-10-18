@@ -95,6 +95,10 @@ Open `http://localhost:3000`. The three seed markets are clearly labelled fictio
 
 The UI also runs without a database and displays an honest unavailable state. `/api/health` reports the application version; `/api/ready` returns 503 until the current migrations, required schema and enabled application triggers, authentication key, origin, and production trusted-proxy header configuration are available. Readiness does not certify proxy networking or worker health; verify those during deployment. `npm run worker` performs durable order-expiry maintenance and resumable market payouts. Use `npm run worker -- --once` for one pass, or keep the worker running for expiry checks and bounded payout batches.
 
+## Production deployment
+
+Read [Production deployment and operations](docs/PRODUCTION_DEPLOYMENT.md) for the isolated app/worker/database/proxy deployment, restricted runtime grants, HTTPS acceptance, safe worker monitoring and alert setup. `npm run test:deployment` rehearses the stack with disposable synthetic data. Actual-host acceptance, backup/restore (item 7), and browser/load checks remain required.
+
 ## Verification
 
 ```sh
