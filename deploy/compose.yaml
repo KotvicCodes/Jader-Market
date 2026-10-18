@@ -1,0 +1,97 @@
+name: jader-production
+x-runtime: &runtime
+  image: ${JADER_IMAGE:-jader-market:local}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 40s
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  environment: &environment
+    DATABASE_URL: ${JADER_RUNTIME_DATABASE_URL:?Set runtime database URL}
+    AUTH_SECRET: ${AUTH_SECRET:?Set matching authentication key}
+    APP_ORIGIN: https://${JADER_HOST:?Set deployment hostname}
+    AUTH_TRUSTED_IP_HEADER: x-real-ip
+    WORKER_STATUS_FILE: /var/lib/jader-worker/status.json
+  networks: [backend]
+services:
+  db:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "log_statement=none", "-c", "log_min_error_statement=panic", "-c", "log_min_messages=panic", "-c", "log_connections=off", "-c", "log_disconnections=off"]
+    environment:
+      POSTGRES_USER: jader_bootstrap
+      POSTGRES_DB: jader_market
+      POSTGRES_PASSWORD: ${JADER_BOOTSTRAP_PASSWORD:?Set bootstrap password}
+      JADER_OWNER_PASSWORD: ${JADER_OWNER_PASSWORD:?Set migration owner password}
+      JADER_RUNTIME_PASSWORD: ${JADER_RUNTIME_PASSWORD:?Set runtime password}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
+    networks: [backend]
+    healthcheck:
+      # The entrypoint's temporary initialization server accepts Unix sockets
+      # before roles/scripts finish. Only the final server accepts TCP.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "jader_bootstrap", "-d", "jader_market"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  migrate:
+    <<: *runtime
+    restart: "no"
+    profiles: [tools]
+    environment:
+      <<: *environment
+      DATABASE_URL: ${JADER_OWNER_DATABASE_URL:?Set migration owner database URL}
+    command: ["sh", "-c", "npm run db:migrate && npm run db:runtime-grants"]
+  app:
+    <<: *runtime
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready',{signal:AbortSignal.timeout(5000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 8s
+      retries: 3
+  worker:
+    <<: *runtime
+    command: ["node", "--import", "./scripts/register-typescript.mjs", "scripts/worker.ts"]
+    depends_on:
+      db: {condition: service_healthy}
+    volumes: ["worker-status:/var/lib/jader-worker"]
+  monitor:
+    <<: *runtime
+    command: ["node", "--import", "./scripts/register-typescript.mjs", "scripts/operations.ts", "--watch"]
+    depends_on: [worker]
+    volumes: ["worker-status:/var/lib/jader-worker:ro"]
+    healthcheck:
+      test: ["CMD", "npm", "run", "ops:check"]
+      interval: 15s
+      timeout: 20s
+      retries: 2
+  proxy:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    depends_on:
+      app: {condition: service_healthy}
+    environment:
+      JADER_HOST: ${JADER_HOST:?Set deployment hostname}
+      NGINX_ENVSUBST_FILTER: ^JADER_HOST$
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ${JADER_TLS_DIRECTORY:?Set absolute TLS certificate directory}:/etc/nginx/tls:ro
+    networks: [edge, backend]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+networks:
+  edge: {}
+  backend: {internal: true}
+volumes:
+  postgres: {}
+  worker-status: {}

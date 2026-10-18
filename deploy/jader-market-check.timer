@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Jader Market every 30 seconds
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=30
+Unit=jader-market-check.service
+
+[Install]
+WantedBy=timers.target

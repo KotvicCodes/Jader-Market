@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { grantRuntimeRole } from "../src/db/runtime-role";
 import { createDatabase } from "../src/db/client";
 import { ledgerAccounts, markets, sessions, users } from "../src/db/schema";
 import { digest, hashPassword, totp } from "../src/domain/identity";
@@ -24,6 +25,10 @@ const isolatedUrl = new URL(url);
 isolatedUrl.pathname = `/${databaseName}`;
 const connection = createDatabase(isolatedUrl.toString());
 let databaseCreated = false;
+let roleCreated = false;
+const runtimeRole = `jader_runtime_${randomUUID().replaceAll("-", "")}`;
+const runtimePassword = randomBytes(24).toString("hex");
+const runtimeUrl = new URL(isolatedUrl); runtimeUrl.username = runtimeRole; runtimeUrl.password = runtimePassword;
 const origin = "http://127.0.0.1:3107";
 const secret = randomBytes(32).toString("hex");
 const password = randomBytes(24).toString("base64url");
@@ -60,6 +65,9 @@ try {
   await control.client.unsafe(`CREATE DATABASE "${databaseName}"`);
   databaseCreated = true;
   await migrate(connection.db, { migrationsFolder: "drizzle" });
+  await control.client.unsafe(`CREATE ROLE "${runtimeRole}" LOGIN PASSWORD '${runtimePassword}'`);
+  roleCreated = true;
+  await grantRuntimeRole(connection.db, runtimeRole);
   const [admin] = await connection.db.insert(users).values({ handle: adminHandle, role: "admin", passwordHash: await hashPassword(password) }).returning();
   await connection.db.insert(ledgerAccounts).values([{ kind: "wallet", ownerId: admin.id }, { kind: "reserved", ownerId: admin.id }]);
   await connection.db.insert(ledgerAccounts).values({ kind: "issuance" }).onConflictDoNothing();
@@ -67,7 +75,7 @@ try {
   mkdirSync(temporaryDirectory, { recursive: true });
   child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3107"], {
     cwd: process.cwd(), stdio: "ignore",
-    env: { ...process.env, DATABASE_URL: isolatedUrl.toString(), AUTH_SECRET: secret, APP_ORIGIN: origin, AUTH_TRUSTED_IP_HEADER: "x-test-client-ip", NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
+    env: { ...process.env, DATABASE_URL: runtimeUrl.toString(), AUTH_SECRET: secret, APP_ORIGIN: origin, AUTH_TRUSTED_IP_HEADER: "x-test-client-ip", NEXT_TELEMETRY_DISABLED: "1", TMPDIR: temporaryDirectory },
   });
   let ready = false;
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -307,7 +315,7 @@ try {
   const settlingPage = await (await request(`/markets/${slug}`, new Map())).text();
   check(settlingPage.includes("Final result: ") && settlingPage.includes(resolution.evidence) && settlingPage.includes("Collateral payouts are in progress"));
   check(!settlingPage.includes(participantId) && !settlingPage.includes(admin.id));
-  const workerEnv = { ...process.env, DATABASE_URL: isolatedUrl.toString(), AUTH_SECRET: secret };
+  const workerEnv = { ...process.env, DATABASE_URL: runtimeUrl.toString(), AUTH_SECRET: secret };
   for (let pass=0; pass<2; pass++) {
     const worker = spawnSync(process.execPath, ["scripts/run.mjs", "node", "--import", "./scripts/register-typescript.mjs", "scripts/worker.ts", "--once"], { cwd: process.cwd(), env: workerEnv, encoding: "utf8", timeout: 30000 });
     check(!worker.error && worker.status === 0);
@@ -420,6 +428,7 @@ try {
   } finally {
     try {
       if (databaseCreated) await control.client.unsafe(`DROP DATABASE "${databaseName}" WITH (FORCE)`);
+      if (roleCreated) await control.client.unsafe(`DROP ROLE "${runtimeRole}"`);
     } catch {
       console.error("HTTP verification cleanup failed.");
       process.exitCode = 1;

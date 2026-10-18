@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { getDatabase } from "../src/db/client";
 import { expireTradingOrders } from "../src/db/trading";
 
+import { recordWorkerStatus } from "../src/domain/worker-status";
 import { settleMarkets } from "../src/db/settlement";
 
 const connection = getDatabase();
@@ -15,10 +16,20 @@ if (!connection) {
 } else {
   try {
     do {
+      let passSucceeded = false;
       try {
         await expireTradingOrders();
         await settleMarkets();
-      } catch {
+        passSucceeded = true;
+      } catch { /* Record the maintenance outcome separately from status I/O. */ }
+      if (process.env.WORKER_STATUS_FILE) {
+        try {
+          await recordWorkerStatus(process.env.WORKER_STATUS_FILE, passSucceeded);
+        } catch {
+          console.error("Worker status could not be recorded.");
+        }
+      }
+      if (!passSucceeded) {
         if (process.argv.includes("--once")) throw new Error("maintenance_failed");
         console.error("Trading maintenance pass failed; retrying.");
       }

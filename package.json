@@ -1,6 +1,6 @@
 {
   "name": "jader-market",
-  "version": "0.1.12",
+  "version": "0.1.14",
   "private": true,
   "type": "module",
   "engines": {
@@ -23,7 +23,12 @@
     "admin:recover": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/admin.ts --recover",
     "worker": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/worker.ts",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
-    "reconcile": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/reconcile.ts"
+    "reconcile": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/reconcile.ts",
+    "db:runtime-grants": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/runtime-grants.ts",
+    "ops:check": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/operations.ts",
+    "test:deployment": "node scripts/test-deployment.mjs",
+    "backup": "node scripts/backup.mjs",
+    "test:recovery": "node scripts/test-recovery.mjs"
   },
   "dependencies": {
     "dotenv": "18.0.5",

@@ -1,0 +1,6 @@
+[Unit]
+Description=Alert on Jader Market deployment check failure
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger --priority daemon.crit --tag jader-market "Deployment check failed; follow the private operations runbook."
