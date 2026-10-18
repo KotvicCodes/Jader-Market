@@ -30,7 +30,7 @@ export function parseExternalRegister(input: unknown): ExternalRegister {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return invalid();
     const row = raw as Record<string, unknown>;
     if (Object.keys(row).some(key => !["direction", "reference", "amount", "journalId", "withdrawalId"].includes(key)) ||
-      !["incoming", "outgoing"].includes(String(row.direction)) ||
+      (row.direction !== "incoming" && row.direction !== "outgoing") ||
       typeof row.reference !== "string" || row.reference.length<3 || row.reference.length>120 ||
       row.reference!==row.reference.trim() || /[\u0000-\u001f\u007f]/.test(row.reference) ||
       typeof row.amount !== "string" || !/^[1-9]\d{0,10}$/.test(row.amount) || BigInt(row.amount) > 10_000_000_000n ||

@@ -36,12 +36,12 @@ Every query runs in one read-only repeatable-read transaction. Trading and worke
 
 Checks cover:
 
-- Required wallet/reserved accounts and issuance account; accounting record links.
+- Required wallet/reserved accounts and issuance account; accounting record links, including missing users, markets and withdrawal parents.
 - Account balances against ledger entries; journal balance, amount and source/destination accounts.
-- Holdings against available/reserved share movements; complete-set mint/burn evidence.
+- Holdings against available/reserved share movements; complete-set mint/burn evidence; movement signs, operation kinds and fill/payout links independently of current totals.
 - Open buy-order credit reservations and open sell-order share reservations, including missing accounts/holdings. Expired orders still stored as open retain their reservation until maintenance releases it.
 - Requested/processing withdrawal reservations and complete withdrawal transition/journal history.
-- Order quantities against fills and fill credit/share transfers.
+- Placement operations against durable orders, order quantities against fills, maker/taker sequence and operation identity, and fill credit/share transfers. Open orders on explicitly closed/synthetic markets or suspended accounts fail; elapsed deadlines and order expiry can await normal maintenance with their reservations intact.
 - Per-market escrow against outstanding YES/NO supply. Unresolved pairs require 10000 ticks collateral per pair. During settlement, remaining winning shares require 10000 ticks each, losing shares zero, and invalid-result shares 5000 ticks each.
 - Resolution lifecycle, payout amounts, journals and consumed shares, including zero-credit losing receipts and partial payout batches. A valid unfinished settlement is reported in the summary and can pass accounting checks; this is not a worker health check.
 - Payment-reference uniqueness and external payment matching.

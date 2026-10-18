@@ -6,12 +6,27 @@ export const reconciliationChecks: Record<string, SQL> = {
   accounting_links: sql`
     SELECT e.id::text AS id, 'ledger_entry' AS source FROM ledger_entries e
       LEFT JOIN journals j ON j.id=e.journal_id LEFT JOIN ledger_accounts a ON a.id=e.account_id WHERE j.id IS NULL OR a.id IS NULL
+    UNION ALL SELECT a.id::text, 'ledger_account' FROM ledger_accounts a
+      LEFT JOIN users u ON u.id=a.owner_id LEFT JOIN markets m ON m.id=a.market_id
+      WHERE (a.owner_id IS NOT NULL AND u.id IS NULL) OR (a.market_id IS NOT NULL AND m.id IS NULL)
+    UNION ALL SELECT h.id::text, 'holding' FROM holdings h
+      LEFT JOIN users u ON u.id=h.owner_id LEFT JOIN markets m ON m.id=h.market_id WHERE u.id IS NULL OR m.id IS NULL
+    UNION ALL SELECT t.id::text, 'trading_operation' FROM trading_operations t
+      LEFT JOIN users u ON u.id=t.owner_id LEFT JOIN markets m ON m.id=t.market_id
+      WHERE (t.owner_id IS NOT NULL AND u.id IS NULL) OR m.id IS NULL
+    UNION ALL SELECT w.id::text, 'withdrawal' FROM withdrawals w LEFT JOIN users u ON u.id=w.owner_id WHERE u.id IS NULL
+    UNION ALL SELECT o.id::text, 'withdrawal_operation' FROM withdrawal_operations o
+      LEFT JOIN users u ON u.id=o.actor_id LEFT JOIN withdrawals w ON w.id=o.withdrawal_id WHERE u.id IS NULL OR w.id IS NULL
+    UNION ALL SELECT r.id::text, 'resolution' FROM market_resolutions r
+      LEFT JOIN users u ON u.id=r.actor_id LEFT JOIN markets m ON m.id=r.market_id WHERE u.id IS NULL OR m.id IS NULL
     UNION ALL SELECT s.id::text, 'share_movement' FROM share_movements s
       LEFT JOIN holdings h ON h.id=s.holding_id LEFT JOIN trading_operations t ON t.id=s.operation_id
       WHERE h.id IS NULL OR t.id IS NULL OR t.market_id IS DISTINCT FROM h.market_id
     UNION ALL SELECT j.id::text, 'journal' FROM journals j
       LEFT JOIN trading_operations t ON t.id=j.trading_operation_id LEFT JOIN withdrawal_operations w ON w.id=j.withdrawal_operation_id
-      WHERE (j.trading_operation_id IS NOT NULL AND t.id IS NULL) OR (j.withdrawal_operation_id IS NOT NULL AND w.id IS NULL)
+      LEFT JOIN users actor ON actor.id=j.actor_id LEFT JOIN users recipient ON recipient.id=j.recipient_id
+      WHERE actor.id IS NULL OR recipient.id IS NULL
+        OR (j.trading_operation_id IS NOT NULL AND t.id IS NULL) OR (j.withdrawal_operation_id IS NOT NULL AND w.id IS NULL)
         OR (j.trading_operation_id IS NOT NULL AND j.withdrawal_operation_id IS NOT NULL)
         OR (j.trading_operation_id IS NOT NULL AND j.reason<>'trading')
         OR (j.withdrawal_operation_id IS NOT NULL AND j.reason<>'withdrawal')
@@ -69,6 +84,39 @@ export const reconciliationChecks: Record<string, SQL> = {
       coalesce(sum(s.available_delta),0)::text AS expected_available, coalesce(sum(s.reserved_delta),0)::text AS expected_reserved
     FROM holdings h LEFT JOIN share_movements s ON s.holding_id=h.id GROUP BY h.id
     HAVING h.available<>coalesce(sum(s.available_delta),0) OR h.reserved<>coalesce(sum(s.reserved_delta),0)`,
+  // Projections alone cannot validate the meaning of historical movements.
+  // Check from the movement as well as from its fill/receipt so orphaned or
+  // mislabeled records cannot disappear behind balanced current totals.
+  share_history: sql`
+    SELECT s.id::text AS id FROM share_movements s
+      LEFT JOIN trading_operations t ON t.id=s.operation_id LEFT JOIN holdings h ON h.id=s.holding_id
+      LEFT JOIN fills f ON f.id=s.group_id AND f.operation_id=s.operation_id
+      LEFT JOIN orders b ON b.id=f.buy_order_id LEFT JOIN orders a ON a.id=f.sell_order_id
+      LEFT JOIN market_payouts p ON p.id=s.operation_id AND p.holding_id=s.holding_id
+    WHERE (s.kind IN ('reserve','release') AND (t.action NOT IN ('place','cancel','maintenance')
+        OR s.available_delta<>-s.reserved_delta
+        OR (s.kind='reserve' AND (s.reserved_delta<=0 OR t.action<>'place' OR h.owner_id IS DISTINCT FROM t.owner_id))
+        OR (s.kind='release' AND s.reserved_delta>=0)))
+      OR (s.kind='trade' AND (f.id IS NULL OR t.action IS DISTINCT FROM 'place'
+        OR h.market_id IS DISTINCT FROM f.market_id OR h.outcome IS DISTINCT FROM f.outcome
+        OR NOT ((h.owner_id=b.owner_id AND s.available_delta=f.quantity AND s.reserved_delta=0)
+          OR (h.owner_id=a.owner_id AND s.available_delta=0 AND s.reserved_delta=-f.quantity))))
+      OR (s.kind='payout' AND (p.id IS NULL OR s.group_id<>p.id OR t.action IS DISTINCT FROM 'settle'
+        OR s.available_delta<>-p.quantity OR s.reserved_delta<>0))`,
+  trading_operation_history: sql`
+    SELECT t.id::text AS id FROM trading_operations t
+    WHERE (t.action IN ('mint','burn') AND (SELECT count(*) FROM journals j WHERE j.trading_operation_id=t.id)<>1)
+      OR (t.action='place' AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id=t.id AND o.operation_id=t.id))
+      OR (t.action='settle' AND (NOT EXISTS (SELECT 1 FROM market_payouts p WHERE p.id=t.id)
+        OR (SELECT count(*) FROM share_movements s WHERE s.operation_id=t.id)<>1
+        OR (SELECT count(*) FROM journals j WHERE j.trading_operation_id=t.id)<>
+          (SELECT CASE WHEN p.amount=0 THEN 0 ELSE 1 END FROM market_payouts p WHERE p.id=t.id)))
+      OR EXISTS (SELECT 1 FROM journals j WHERE j.trading_operation_id=t.id AND NOT (
+        (t.action IN ('mint','burn') AND j.kind=t.action) OR (t.action='place' AND j.kind IN ('reserve','release','trade'))
+        OR (t.action IN ('cancel','maintenance') AND j.kind='release') OR (t.action='settle' AND j.kind='payout')))
+      OR EXISTS (SELECT 1 FROM share_movements s WHERE s.operation_id=t.id AND NOT (
+        (t.action IN ('mint','burn') AND s.kind=t.action) OR (t.action='place' AND s.kind IN ('reserve','release','trade'))
+        OR (t.action IN ('cancel','maintenance') AND s.kind='release') OR (t.action='settle' AND s.kind='payout')))`,
   buy_reservations: sql`
     WITH needed AS (SELECT owner_id, sum(price::numeric*remaining) AS amount FROM orders WHERE status='open' AND side='buy' GROUP BY owner_id),
       held AS (SELECT owner_id, balance AS amount FROM ledger_accounts WHERE kind='reserved')
@@ -106,6 +154,12 @@ export const reconciliationChecks: Record<string, SQL> = {
     FROM orders o LEFT JOIN executed f ON f.order_id=o.id LEFT JOIN trading_operations t ON t.id=o.operation_id
     WHERE o.remaining<>o.quantity-coalesce(f.quantity,0) OR t.action IS DISTINCT FROM 'place' OR t.owner_id IS DISTINCT FROM o.owner_id
       OR t.market_id IS DISTINCT FROM o.market_id OR o.id<>o.operation_id OR (o.status='open' AND o.time_in_force='IOC')`,
+  // Deadline/expiry cleanup is asynchronous; raw closed market status and
+  // suspension, however, must release orders in the same financial commit.
+  order_lifecycle: sql`
+    SELECT o.id::text AS id FROM orders o LEFT JOIN markets m ON m.id=o.market_id LEFT JOIN users u ON u.id=o.owner_id
+    WHERE m.id IS NULL OR u.id IS NULL
+      OR (o.status='open' AND (m.status<>'open' OR u.suspended OR m.synthetic='yes'))`,
   fill_accounting: sql`
     SELECT f.id::text AS id FROM fills f LEFT JOIN orders b ON b.id=f.buy_order_id LEFT JOIN orders s ON s.id=f.sell_order_id
       LEFT JOIN orders maker ON maker.id=f.maker_order_id LEFT JOIN journals j ON j.id=f.id
@@ -114,6 +168,9 @@ export const reconciliationChecks: Record<string, SQL> = {
       OR b.market_id IS DISTINCT FROM f.market_id OR s.market_id IS DISTINCT FROM f.market_id
       OR b.outcome IS DISTINCT FROM f.outcome OR s.outcome IS DISTINCT FROM f.outcome
       OR maker.id IS NULL OR maker.id NOT IN (b.id,s.id) OR f.price<>maker.price OR f.price>b.price OR f.price<s.price
+      OR maker.sequence>=greatest(b.sequence,s.sequence)
+      OR f.operation_id IS DISTINCT FROM CASE WHEN maker.id=b.id THEN s.id ELSE b.id END
+      OR t.owner_id IS DISTINCT FROM CASE WHEN maker.id=b.id THEN s.owner_id ELSE b.owner_id END
       OR t.action IS DISTINCT FROM 'place' OR t.market_id IS DISTINCT FROM f.market_id
       OR j.kind IS DISTINCT FROM 'trade' OR j.amount IS DISTINCT FROM f.price*f.quantity OR j.trading_operation_id IS DISTINCT FROM f.operation_id
       OR NOT EXISTS (SELECT 1 FROM ledger_entries e JOIN ledger_accounts a ON a.id=e.account_id WHERE e.journal_id=j.id AND a.owner_id=b.owner_id AND a.kind='reserved' AND e.delta=-j.amount)
@@ -150,8 +207,8 @@ export const reconciliationChecks: Record<string, SQL> = {
     WITH history AS (SELECT o.*, row_number() OVER (PARTITION BY withdrawal_id ORDER BY sequence) AS position,
       lag(to_status) OVER (PARTITION BY withdrawal_id ORDER BY sequence) AS prior_status,
       row_number() OVER (PARTITION BY withdrawal_id ORDER BY sequence DESC) AS latest FROM withdrawal_operations o)
-    SELECT o.id::text AS id FROM history o JOIN withdrawals w ON w.id=o.withdrawal_id
-    WHERE o.from_status IS DISTINCT FROM o.prior_status
+    SELECT o.id::text AS id FROM history o LEFT JOIN withdrawals w ON w.id=o.withdrawal_id
+    WHERE w.id IS NULL OR o.from_status IS DISTINCT FROM o.prior_status
       OR NOT ((o.position=1 AND o.action='request' AND o.from_status IS NULL AND o.to_status='requested' AND o.id=w.id)
         OR (o.position>1 AND ((o.action='start' AND o.from_status='requested' AND o.to_status='processing')
           OR (o.action='cancel' AND o.from_status='requested' AND o.to_status='cancelled')

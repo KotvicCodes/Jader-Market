@@ -147,6 +147,70 @@ describe("operator reconciliation",() => {
     await corrupt(sql`UPDATE ledger_accounts SET balance=balance+1 WHERE market_id=${marketId}::uuid AND kind='escrow'`,sql`UPDATE ledger_accounts SET balance=balance-1 WHERE market_id=${marketId}::uuid AND kind='escrow'`,["collateral"]);
   });
 
+  it("detects missing cancelled withdrawals even though their reservations are already released",async () => {
+    const [row] = await connection.db.execute(sql`SELECT id::text,to_jsonb(w)::text AS record FROM withdrawals w WHERE status='cancelled' LIMIT 1`);
+    await corrupt(sql`DELETE FROM withdrawals WHERE id=${row.id}::uuid`,
+      sql`INSERT INTO withdrawals SELECT * FROM jsonb_populate_record(NULL::withdrawals,${row.record as string}::jsonb)`,["withdrawal_history"]);
+  });
+
+  it("validates historical share reservation semantics independently of current balances",async () => {
+    const [movement] = await connection.db.execute(sql`SELECT id::text FROM share_movements WHERE operation_id=${sellId}::uuid AND kind='reserve'`);
+    await corrupt(sql`UPDATE share_movements SET kind='release' WHERE id=${movement.id}::uuid`,
+      sql`UPDATE share_movements SET kind='reserve' WHERE id=${movement.id}::uuid`,["share_history"]);
+  });
+
+  it("detects missing cancelled orders through their durable placement operations",async () => {
+    const marketId = await market();
+    await trade(alice,"mint",marketId,{ quantity: "1" });
+    const placed = await trade(alice,"place",marketId,{ quantity: "1",outcome: "NO" });
+    const id = (placed.order as { id: string }).id;
+    await trade(alice,"cancel",marketId,{ orderId: id });
+    const [row] = await connection.db.execute(sql`SELECT to_jsonb(o)::text AS record FROM orders o WHERE id=${id}::uuid`);
+    await corrupt(sql`DELETE FROM orders WHERE id=${id}::uuid`,
+      sql`INSERT INTO orders OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::orders,${row.record as string}::jsonb)`,["trading_operation_history"]);
+  });
+
+  it("rejects reversed maker/taker history even when both limit prices are equal",async () => {
+    const id = await market();
+    await trade(alice,"mint",id,{ quantity: "1" });
+    await trade(alice,"place",id,{ quantity: "1" });
+    await trade(bob,"place",id,{ quantity: "1",side: "buy" });
+    const [fill] = await connection.db.execute(sql`SELECT id::text,buy_order_id::text,sell_order_id::text FROM fills WHERE market_id=${id}::uuid`);
+    await corrupt(sql`UPDATE fills SET maker_order_id=buy_order_id WHERE id=${fill.id}::uuid`,
+      sql`UPDATE fills SET maker_order_id=sell_order_id WHERE id=${fill.id}::uuid`,["fill_accounting"]);
+  });
+
+  it("rejects stranded open orders on closed markets and suspended accounts",async () => {
+    await corrupt(sql`UPDATE markets SET status='closed' WHERE id=${marketId}::uuid`,
+      sql`UPDATE markets SET status='open' WHERE id=${marketId}::uuid`,["order_lifecycle"]);
+    await corrupt(sql`UPDATE users SET suspended=true WHERE id=${ids.get(alice)}::uuid`,
+      sql`UPDATE users SET suspended=false WHERE id=${ids.get(alice)}::uuid`,["order_lifecycle"]);
+  });
+
+  it("reconciles buy makers, sell takers and IOC share releases",async () => {
+    const id = await market();
+    await trade(alice,"mint",id,{ quantity: "3" });
+    await trade(bob,"place",id,{ quantity: "2",side: "buy",price: "3000" });
+    await trade(alice,"place",id,{ quantity: "3",price: "2500",timeInForce: "IOC" });
+    await assertClean();
+  });
+
+  it("allows reservations awaiting expiry maintenance and orders on paused markets",async () => {
+    const id = await market();
+    const placed = await trade(bob,"place",id,{ side: "buy",timeInForce: "GTD",expiresAt: new Date(Date.now()+60000).toISOString().replace(/\.\d{3}Z$/,"Z") });
+    const orderId = (placed.order as { id: string }).id;
+    await mutateMarket(admin,"pause",{ id,revision: 0,operationKey: randomUUID(),confirmed: true });
+    await assertClean();
+    // Advance only the persisted deadlines to emulate time elapsing before the
+    // worker's next pass; the raw market/order statuses legitimately stay open.
+    await connection.db.transaction(async tx => {
+      await tx.execute(sql`SET LOCAL session_replication_role = replica`);
+      await tx.execute(sql`UPDATE orders SET expires_at=clock_timestamp()-interval '1 minute' WHERE id=${orderId}::uuid`);
+      await tx.execute(sql`UPDATE markets SET closes_at=clock_timestamp()-interval '30 seconds' WHERE id=${id}::uuid`);
+    });
+    await assertClean();
+  });
+
   it("detects buy, sell and withdrawal reservation mismatches and altered order history",async () => {
     await corrupt(sql`UPDATE orders SET remaining=remaining-1 WHERE id=${buyId}::uuid`,sql`UPDATE orders SET remaining=remaining+1 WHERE id=${buyId}::uuid`,["buy_reservations","order_fills"]);
     await corrupt(sql`UPDATE orders SET remaining=remaining-1 WHERE id=${sellId}::uuid`,sql`UPDATE orders SET remaining=remaining+1 WHERE id=${sellId}::uuid`,["sell_reservations","order_fills"]);
@@ -165,6 +229,9 @@ describe("operator reconciliation",() => {
     const [holding] = await connection.db.execute(sql`SELECT to_jsonb(h)::text AS record FROM holdings h WHERE market_id=${marketId}::uuid AND owner_id=${ids.get(alice)}::uuid AND outcome='YES'`);
     await corrupt(sql`DELETE FROM holdings WHERE market_id=${marketId}::uuid AND owner_id=${ids.get(alice)}::uuid AND outcome='YES'`,
       sql`INSERT INTO holdings SELECT * FROM jsonb_populate_record(NULL::holdings,${holding.record as string}::jsonb)`,["sell_reservations","accounting_links"]);
+    const [actor] = await connection.db.execute(sql`SELECT to_jsonb(u)::text AS record FROM users u WHERE id=${ids.get(admin)}::uuid`);
+    await corrupt(sql`DELETE FROM users WHERE id=${ids.get(admin)}::uuid`,
+      sql`INSERT INTO users SELECT * FROM jsonb_populate_record(NULL::users,${actor.record as string}::jsonb)`,["accounting_links"]);
   });
 
   it("reconciles YES, NO and invalid payouts, zero-value receipts, and interrupted settlement",async () => {
@@ -188,6 +255,9 @@ describe("operator reconciliation",() => {
     await corrupt(sql`DELETE FROM market_payouts WHERE id=${zero.id}::uuid`,
       sql`INSERT INTO market_payouts OVERRIDING SYSTEM VALUE SELECT * FROM jsonb_populate_record(NULL::market_payouts,${zero.record as string}::jsonb)`,["payout_coverage"]);
     await corrupt(sql`UPDATE markets SET status='closed' WHERE id=${id}::uuid`,sql`UPDATE markets SET status='resolved' WHERE id=${id}::uuid`,["settlement_lifecycle"]);
+    const [settled] = await connection.db.execute(sql`SELECT to_jsonb(m)::text AS record FROM markets m WHERE id=${id}::uuid`);
+    await corrupt(sql`DELETE FROM markets WHERE id=${id}::uuid`,
+      sql`INSERT INTO markets SELECT * FROM jsonb_populate_record(NULL::markets,${settled.record as string}::jsonb)`,["accounting_links"]);
   });
 
   it("reads coherent snapshots while financial writes commit",async () => {
