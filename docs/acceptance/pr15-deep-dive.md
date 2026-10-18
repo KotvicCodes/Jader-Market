@@ -1,0 +1,32 @@
+# PR #15 deep review — 18 October 2026
+
+Reviewed `ed83c615540fdd4653c8ce1deab46f647cb3eaf9` against `main` (`5ab766f1e5b602e24fe3d2d661ef1b0e66ac3c55`): all 69 changed files, including inherited deployment, monitoring and recovery work. The review also traced the authentication/CSRF/account-binding, transaction locking, trading, settlement, readiness and reconciliation paths exercised by acceptance. Earlier review records were treated as background; the checks below were run again in this checkout.
+
+## Findings and fixes
+
+1. **P2 — backup subprocess deadlines did not guarantee failure or termination.** `spawn({ timeout: 1_800_000 })` only sends SIGTERM to the immediate child. A process can handle that signal and exit successfully, causing `command()` to report success after its deadline, or ignore it indefinitely. A probe shortened the original spawn timeout to 100 ms; a SIGTERM-resistant child exited successfully after 1,264 ms and the original helper accepted it. The helper now tracks deadline expiration independently of exit status and escalates termination to SIGKILL after a bounded grace period. Commands and streaming dumps share this behavior; the normal 30-minute deadline remains unchanged.
+
+2. **P2 — backup command descendants could outlive their scripts and block cleanup.** An exited script's descendant can hold stdout open, preventing the `close` event that the helper awaits. A descendant with independent stdio can instead survive a successful command and escape cleanup entirely. The helper now owns a POSIX process group, terminates it even after its leader exits, and joins termination before returning or releasing backup resources. Active helpers forward SIGINT/SIGTERM and reject interrupted work, so detaching the group does not leave it running when the caller is interrupted. Backup cancellation is awaited before deleting partial files or releasing the backup lock.
+
+Six subprocess regressions cover successful exit after a deadline, ignored SIGTERM, inherited output pipes, independent-stdio descendants, streaming-dump deadlines and caller interruption. The first four were observed failing with the original implementation and passing after the fix. Fixtures have their own short fallback lifetime/cleanup and contact no deployment or database. Linux/macOS process groups are covered; Windows does not provide this descendant-cleanup guarantee.
+
+No additional application financial-logic defect was reproduced in the reviewed changes or exercised flows. Passing these checks does not establish correctness for every input, browser or deployment.
+
+## Verification
+
+- Final `npm run verify`: TypeScript, lint, **194 unit/component tests** and production build passed.
+- **130 PostgreSQL integration tests** passed in a fresh disposable container, including runtime privilege restrictions, monitoring and recovery validation.
+- Production HTTP workflows passed for accounts, MFA/authentication, credits, markets, trading, withdrawals, privacy, origin/CSRF enforcement and sessions under the restricted runtime role.
+- The complete browser suite passed: desktop, mobile/touch and keyboard workflows, plus the desktop interruption lifecycle test. The two duplicate lifecycle projects are intentionally skipped. Assertions include accessibility/reflow, focus, committed-request replay, live fill/pause updates, exact balances and payout quantities/amounts, consumed holdings, released reservations, sign-out, worker restart and complete reconciliation.
+- The unchanged pilot-load profile passed in **62.418 seconds**: 1,200 reads, 120 writes, zero request/sampling errors, p95 reads **26 ms**, p95 writes **98 ms**, conservative financial-lock wait bound **111 ms**. Maximum observed heartbeat/settlement/expiry lag was 1,108/1,199/723 ms. All 1,060 fills, 40 payout receipts, 70 active-market mints and both 1,060-share outcome totals matched. Restart produced no duplicate payouts and complete reconciliation passed. [Retained aggregate](item8-deep-dive-load.json).
+- Production-only and full dependency audits reported zero known vulnerabilities.
+- A clean dependency install and production build succeeded through the committed Dockerfile. The final source was rebuilt into the review image before deployment validation.
+- The isolated backup/restore drill passed with the updated helper: exact restored history, original MFA key, session revocation, collateral/reservations, resumable payouts, corruption/wrong-key rejection, release binding, retention and replication/freshness failure checks.
+- The complete Docker deployment rehearsal passed using the final review image: initialization gating, owner migrations/runtime grants, HTTPS certificate validation, version/readiness, redirects/HSTS, secure cookies, origin rejection, trusted-IP overwrite, private networks/ports, app address replacement behind the running proxy, actual worker crash/restart, graceful SIGTERM and stale-worker alert/recovery.
+- The backup/restore drill passed again using that freshly built final image as its base. Its backup helper's SHA-256 matched this checkout. Review image digest: `sha256:ca9da8a57645e4c2372cb216aa8109252e983c942614e13571b46b2a35d3ebfc`.
+
+Local environment: Node 22.22.1, npm 11.21.0, PostgreSQL 17.6, Linux ARM64. Local browser runs used the documented Chromium override at `/tmp/jader-pr15-chromium/chromium` (Chromium 153), rather than Playwright's pinned Chromium build. The local filesystem had insufficient space for another complete dependency tree, so local commands reused hard-linked package files from a checkout with a byte-identical lockfile; the Docker build independently completed `npm ci`.
+
+Both GitHub `verify` jobs and both macOS portability jobs passed for the reviewed PR head. Those remote results predate the follow-up fixes accompanying this report; CI must validate the updated revision separately. No merge or production deployment was performed.
+
+All data used for review was synthetic and isolated from the existing development database. The review database, acceptance servers/workers, deployment/recovery containers, their data volumes and temporary credential directories were removed. The review image tag was removed after validation. Physical devices, other browser engines, assistive technology, public-network latency, production-host capacity, actual alert delivery and off-host custody remain the operator acceptance checks described in the runbooks.

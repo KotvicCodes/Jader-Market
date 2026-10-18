@@ -63,7 +63,7 @@ async function backup(o) {
     const sealing = seal(source.stream, partial, key, { format: 1, startedAt: new Date().toISOString(), image: config.JADER_IMAGE, imageId: image.Id, authSecret: config.AUTH_SECRET, postgres: '17.6', database: 'jader_market' });
     try { await Promise.all([sealing, source.done]); }
     catch (error) {
-      source.cancel(); source.stream.destroy();
+      source.stream.destroy(); await source.cancel();
       // Finish both operations before deleting the partial or releasing the lock.
       await Promise.allSettled([sealing, source.done]);
       throw error;
@@ -81,7 +81,7 @@ async function backup(o) {
     }
     console.info('Protected backup and replication completed.');
   } finally {
-    source?.cancel();
+    await source?.cancel();
     await rm(partial, { force: true });
     await rm(join(o.directory, '.success.partial'), { force: true });
     await rm(join(o.directory, '.backup-lock'), { recursive: true });
