@@ -17,4 +17,4 @@ COPY --from=build --chown=node:node /app /app
 RUN mkdir -p /var/lib/jader-worker && chown node:node /var/lib/jader-worker
 USER node
 EXPOSE 3000
-CMD ["node", "scripts/run.mjs", "next", "start", "--hostname", "0.0.0.0"]
+CMD ["node", "scripts/run.mjs", "node", "node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0"]
