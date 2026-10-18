@@ -60,3 +60,7 @@ npm run test:http
 ```
 
 Withdrawal tests cover upgrades with historical offline debits, concurrent retries, withdrawal/trading overspending races, owner isolation, recent administrator authentication, cancellation, suspended-owner completion, duplicate payment references, explicit unpaid verification, rollback, request limits, pagination and database tampering. The production HTTP suite exercises the private pages, queue, CSRF/origin checks, payment confirmation and unpaid release.
+
+## Operator reconciliation
+
+Readiness item 5 adds `npm run reconcile` for internal accounting checks and independent external receipt matching. Use the [operator reconciliation runbook](OPERATOR_RECONCILIATION.md) before/after payment batches, after uncertain responses and after each pilot session. Missing external evidence is explicitly incomplete. A sent-but-unconfirmed payment fails reconciliation and must be resolved through verification and the existing confirmation workflow; never resend it to repair an app response.

@@ -1,6 +1,6 @@
 # Automatic refresh and reconnect handling
 
-Readiness item 4 is implemented in PR #11 (0.1.11), stacked on PR #10. No schema migration or new dependency is introduced. Deployment and interactive desktop/mobile/keyboard acceptance remain pending; operational reconciliation, deployment security, recovery and load acceptance remain launch gates.
+Readiness item 4 is implemented in PR #11 (0.1.11), stacked on PR #10. No schema migration or new dependency is introduced. Deployment and interactive desktop/mobile/keyboard acceptance remain pending; [operator reconciliation](OPERATOR_RECONCILIATION.md) implements item 5; deployment security, recovery and load acceptance remain launch gates.
 
 ## What refreshes
 
