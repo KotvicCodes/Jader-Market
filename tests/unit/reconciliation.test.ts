@@ -27,6 +27,7 @@ describe("independent external payment evidence",() => {
       { ...register(),payments: [{ ...receipt(),reference: " ref " }] },
       { ...register(),payments: [{ ...receipt(),reference: "xy" }] },
       { ...register(),payments: [{ ...receipt(),direction: "transfer" }] },
+      { ...register(),payments: [{ ...receipt(),direction: ["incoming"] }] },
       { ...register(),payments: [{ ...receipt(),accountNumber: "private-synthetic-detail" }] },
     ]) expect(() => parseExternalRegister(input)).toThrow("invalid_external_register");
   });
