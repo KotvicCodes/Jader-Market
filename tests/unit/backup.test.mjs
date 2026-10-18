@@ -21,7 +21,7 @@ describe('authenticated private backups', () => {
     const output = join(dir, 'plain');
     const result = await unseal(path, output, key);
     expect(result.metadata).toEqual(metadata);
-    expect((await readFile(output)).subarray(result.offset)).toEqual(plain);
+    expect((await readFile(output)).subarray(result.offset).equals(plain)).toBe(true);
     await privatePath(path); await privatePath(output);
   }));
   for (const fault of ['key','ciphertext','header','tag','truncated']) it(`rejects ${fault} failure`, () => fixture(async dir => {
