@@ -7,7 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { eq } from 'drizzle-orm';
 import { startAcceptance } from './acceptance-environment';
 import { lockWaitBounds } from './acceptance-metrics';
-import { assertLoadReadResponse } from './acceptance-response';
+import { assertLoadReadResponse, assertLoadWriteResponse } from './acceptance-response';
+import type { TradingRequest } from '../src/domain/trading-ticket';
 import { getDatabase } from '../src/db/client';
 import { adjustCredits } from '../src/db/members';
 import { mutateTrading } from '../src/db/trading';
@@ -84,17 +85,19 @@ try{
   await mutateMarket(token,'resolve',{id:settling.id,revision:1,operationKey:randomUUID(),confirmed:true,result:'invalid',evidence:'Verified fictional load acceptance evidence; this rehearsal is invalid for equal refunds.'});
   const expiring=await mutateTrading(actors[0].token,'place',{marketId:active.id,operationKey:randomUUID(),quantity:'1',price:'7500',outcome:'NO',side:'sell',timeInForce:'GTD',expiresAt:new Date(Math.floor((Date.now()+20000)/1000)*1000).toISOString().replace('.000Z','Z')});
   await sample();sampling=setInterval(()=>{const promise=sample();waiters.push(promise);},50);
-  const request=async(actor:typeof actors[number],path:string,body?:Record<string,unknown>)=>{
+  const request=async(actor:typeof actors[number],target:string|TradingRequest)=>{
+    const mutation=typeof target==='string'?undefined:target;
+    const path=typeof target==='string'?target:`/api/trading/${target.action}`;
     const started=performance.now();
     try{
-      const response=await fetch(`${env!.origin}${path}`,{method:body?'POST':'GET',signal:AbortSignal.timeout(10000),headers:{Cookie:`jader_session=${actor.token}; jader_csrf=${actor.csrf}`,
-        ...(body?{'Content-Type':'application/json',Origin:env!.origin,'X-CSRF-Token':actor.csrf,'X-Account-ID':actor.id}:{})},body:body?JSON.stringify(body):undefined});
-      if(body){
-        await response.arrayBuffer();if(!response.ok)throw new Error('unexpected_http_status');
+      const response=await fetch(`${env!.origin}${path}`,{method:mutation?'POST':'GET',signal:AbortSignal.timeout(10000),headers:{Cookie:`jader_session=${actor.token}; jader_csrf=${actor.csrf}`,
+        ...(mutation?{'Content-Type':'application/json',Origin:env!.origin,'X-CSRF-Token':actor.csrf,'X-Account-ID':actor.id}:{})},body:mutation?JSON.stringify(mutation.body):undefined});
+      if(mutation){
+        await assertLoadWriteResponse(response,mutation);
         measuredWrites++;
       }else await assertLoadReadResponse(response,path==='/api/account/portfolio'?'portfolio':'market',actor);
     }catch{unexpectedErrors++;}
-    finally{(body?writes:reads).push(performance.now()-started);}
+    finally{(mutation?writes:reads).push(performance.now()-started);}
   };
   const started=performance.now();
   // Ten concurrent virtual users rotate over all twenty participants. Each performs
@@ -104,8 +107,8 @@ try{
       const actor=actors[vu+(i%2)*profile.concurrency];
       await request(actor,`/api/markets/${active.id}/snapshot`);
       await request(actor,'/api/account/portfolio');
-      if(i%10===0)await request(actor,'/api/trading/mint',{marketId:active.id,operationKey:randomUUID(),quantity:'1'});
-      if(i%10===5)await request(actor,'/api/trading/place',{marketId:active.id,operationKey:randomUUID(),quantity:'1',price:'2500',outcome:'YES',side:'buy',timeInForce:'IOC'});
+      if(i%10===0)await request(actor,{action:'mint',body:{marketId:active.id,operationKey:randomUUID(),quantity:'1'}});
+      if(i%10===5)await request(actor,{action:'place',body:{marketId:active.id,operationKey:randomUUID(),quantity:'1',price:'2500',outcome:'YES',side:'buy',timeInForce:'IOC'}});
       await delay(profile.thinkTimeMs);
     }
   }));
