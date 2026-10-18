@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   logging: false,
   async headers() {
-    const privateHeaders = ["/account", "/portfolio", "/admin", "/api/auth/:path*", "/api/account/:path*", "/api/admin/:path*"].map(source => ({ source, headers: [{ key: "Cache-Control", value: "no-store, private" }] }));
+    const privateHeaders = ["/account", "/portfolio", "/withdrawals", "/admin", "/admin/withdrawals", "/api/withdrawals/:path*", "/api/auth/:path*", "/api/account/:path*", "/api/admin/:path*"].map(source => ({ source, headers: [{ key: "Cache-Control", value: "no-store, private" }] }));
     return [{
       source: "/:path*",
       headers: [

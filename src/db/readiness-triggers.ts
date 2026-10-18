@@ -1,10 +1,10 @@
 // Keep this list aligned with the application triggers installed by migrations.
 // Migration markers and table columns do not prove a restore included its guards.
 export const requiredDatabaseTriggers: Record<string, readonly string[]> = {
-  journals: ["journals_immutable", "journal_balanced", "trading_journal_balanced"],
+  journals: ["journals_immutable", "journal_balanced", "trading_journal_balanced", "withdrawal_journal_guard"],
   ledger_entries: ["entries_immutable", "ledger_apply"],
   admin_audit: ["admin_audit_immutable"],
-  ledger_accounts: ["account_projection", "account_identity", "trading_account_projection"],
+  ledger_accounts: ["account_projection", "account_identity", "trading_account_projection", "withdrawal_account_guard"],
   market_audit: ["market_audit_immutable"],
   markets: ["market_terms_guard", "market_order_lifecycle", "settlement_lifecycle_guard"],
   trading_operations: ["trading_operations_immutable", "trading_operation_guard", "synthetic_trading_guard"],
@@ -16,5 +16,7 @@ export const requiredDatabaseTriggers: Record<string, readonly string[]> = {
   users: ["suspended_order_lifecycle"],
   market_deadline_events: ["deadline_events_immutable", "deadline_event_guard"],
   market_resolutions: ["resolutions_immutable", "resolution_guard"],
+  withdrawals: ["withdrawal_identity", "withdrawal_transition_guard", "withdrawal_balance_guard"],
+  withdrawal_operations: ["withdrawal_operations_immutable", "withdrawal_operation_guard"],
   market_payouts: ["payouts_immutable", "payout_guard"],
 };

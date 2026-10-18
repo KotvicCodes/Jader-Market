@@ -4,15 +4,21 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 const errors: Record<string, string> = {
+  withdrawal_missing: "This withdrawal is unavailable.",
+  withdrawal_stale: "This withdrawal changed. Reload and check its saved state before continuing or sending a payment.",
+  withdrawal_transition: "This action is unavailable. Processing payments stay reserved until confirmed paid or verified unpaid.",
+  withdrawal_limit: "You already have 20 active withdrawals. Finish or cancel an existing request first.",
+  withdrawal_reference_used: "This payment reference was already recorded. Check the withdrawal history before continuing.",
+  invalid_withdrawal_details: "Use a payment reference of 3 to 120 characters or a cancellation/verification note of 20 to 400 characters.",
   invalid_credentials: "Sign-in details could not be verified. Check your password and, if enabled, a fresh authenticator code.",
   invalid_handle: "Use 3 to 32 characters, starting with a letter. Letters, numbers, underscores, and hyphens are allowed.",
   invalid_password: "Use a password between 12 and 128 characters.",
   handle_unavailable: "That handle is unavailable. Choose another.",
   invalid_amount: "Enter a positive credit amount, up to 1,000,000, with at most four decimal places.",
   trading_unavailable: "This browsing example does not accept persistent trades.",
-  insufficient_credits: "This account does not have enough available credits for that debit.",
+  insufficient_credits: "This account does not have enough available credits.",
   account_unavailable: "This account is unavailable. Refresh the account list.",
-  operation_conflict: "This adjustment reference was already used. Check balance history before starting a new adjustment.",
+  operation_conflict: "This request reference was already used for different details. Check the saved result before starting another request.",
   reauth_required: "Confirm your password and authenticator code again before using administrator controls.",
   mfa_required: "Set up your authenticator on the Account page first.",
   invalid_mfa: "The authenticator code could not be verified. Use a fresh six-digit code.",
@@ -46,7 +52,7 @@ export function MemberForm({ endpoint, csrf = "", children, submitLabel, success
     if (pending) return;
     const form = event.currentTarget;
     const values: Record<string, unknown> = Object.fromEntries(new FormData(form));
-    if ("confirmed" in values) values.confirmed = values.confirmed === "on";
+    for (const name of ["confirmed", "verifiedNotSent"]) if (name in values) values[name] = values[name] === "on";
     if (key) values.operationKey = key;
     setPending(true);
     setMessage(undefined);
