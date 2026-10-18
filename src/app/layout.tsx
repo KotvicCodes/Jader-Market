@@ -16,7 +16,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <nav aria-label="Main navigation"><Link href="/">Markets</Link><Link href="/demo">Try demo</Link><Link href="/portfolio">Portfolio</Link><Link href="/account">Account</Link><Link href="/admin">Admin</Link></nav>
       <span className="badge">Prototype</span>
     </div></header>
-    <main id="main" className="container">{children}</main>
+    <main id="main" className="container" tabIndex={-1}>{children}</main>
     <footer className="container footer"><span>Closed community · Offline settlement</span><span>Jader-Market v{version}</span></footer>
   </body></html>;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 const errors: Record<string, string> = {
@@ -43,6 +43,7 @@ export function MemberForm({ endpoint, csrf = "", children, submitLabel, success
   resetOnSuccess?: boolean; newOperationLabel?: string | false; transformValues?: (values: Record<string, unknown>) => Record<string, unknown>;
 }) {
   const router = useRouter();
+  const focusFeedback = useCallback((node: HTMLParagraphElement | null) => node?.focus(), []);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean }>();
   const [key, setKey] = useState(operationKey);
@@ -74,9 +75,9 @@ export function MemberForm({ endpoint, csrf = "", children, submitLabel, success
     } finally { setPending(false); }
   }
 
-  return <form className="member-form" onSubmit={submit}>
+  return <form className="member-form" onSubmit={submit} aria-busy={pending}>
     <fieldset disabled={pending}>{children}<button type="submit">{pending ? "Saving…" : submitLabel}</button>{operationKey && newOperationLabel && <button type="reset" className="secondary-button" onClick={() => setKey(crypto.randomUUID())}>{newOperationLabel}</button>}</fieldset>
-    {message && <p role={message.error ? "alert" : "status"} className={message.error ? "error" : "success"}>{message.text}</p>}
+    {message && <p tabIndex={-1} ref={focusFeedback} role={message.error ? "alert" : "status"} className={message.error ? "error" : "success"}>{message.text}</p>}
   </form>;
 }
 

@@ -129,3 +129,5 @@ Development dependency overrides replace the Next.js lint plugin's glob dependen
 3. Complete desktop/mobile/keyboard and pilot-load acceptance before real-money operation (item 8).
 
 Use synthetic data during development. Community trading tests should use explicitly created test markets; the seeded browsing examples are not tradable. Never commit credentials, real account information, payment records, exports, or agent instructions.
+
+Browser and pilot-load acceptance: see [the isolated rehearsal and agreed thresholds](docs/PILOT_ACCEPTANCE.md).

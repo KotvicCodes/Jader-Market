@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-10-18T11:36:31.235Z",
+  "applicationVersion": "0.1.15",
+  "profile": {
+    "participants": 20,
+    "concurrency": 10,
+    "historicalTrades": 1000,
+    "roundsPerVirtualUser": 60,
+    "thinkTimeMs": 1000,
+    "p95ReadMs": 1000,
+    "p95WriteMs": 2000,
+    "maxLockWaitMs": 500,
+    "maxWorkerLagMs": 5000
+  },
+  "environment": {
+    "platform": "linux",
+    "architecture": "arm64",
+    "node": "v22.22.1",
+    "logicalCpus": 10,
+    "memoryBytes": 8452653056
+  },
+  "durationMs": 62474,
+  "readRequests": 1200,
+  "writeRequests": 120,
+  "unexpectedErrors": 0,
+  "samplingErrors": 0,
+  "p95ReadMs": 30,
+  "p95WriteMs": 103,
+  "maxObservedLockWaitMs": 54,
+  "maxSamplingGapMs": 59,
+  "clockDriftMs": 1,
+  "lockWaitUpperBoundMs": 114,
+  "maxObservedWorkerLagMs": 1070,
+  "maxObservedSettlementLagMs": 1169,
+  "maxObservedExpiryLagMs": 291,
+  "lockSamples": 1199,
+  "payoutReceipts": 40,
+  "finalFills": 1060,
+  "workerRestartNoDuplicates": true,
+  "reconciliation": "pass",
+  "passed": true
+}
