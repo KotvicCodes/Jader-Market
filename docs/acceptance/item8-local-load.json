@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T11:36:31.235Z",
+  "generatedAt": "2026-10-18T12:04:31.707Z",
   "applicationVersion": "0.1.15",
   "profile": {
     "participants": 20,
@@ -19,23 +19,35 @@
     "logicalCpus": 10,
     "memoryBytes": 8452653056
   },
-  "durationMs": 62474,
+  "durationMs": 62063,
   "readRequests": 1200,
   "writeRequests": 120,
   "unexpectedErrors": 0,
   "samplingErrors": 0,
-  "p95ReadMs": 30,
-  "p95WriteMs": 103,
-  "maxObservedLockWaitMs": 54,
-  "maxSamplingGapMs": 59,
-  "clockDriftMs": 1,
-  "lockWaitUpperBoundMs": 114,
-  "maxObservedWorkerLagMs": 1070,
-  "maxObservedSettlementLagMs": 1169,
-  "maxObservedExpiryLagMs": 291,
-  "lockSamples": 1199,
+  "p95ReadMs": 27,
+  "p95WriteMs": 86,
+  "maxObservedLockWaitMs": 52,
+  "maxSamplingGapMs": 80,
+  "clockDriftMs": 2,
+  "lockWaitUpperBoundMs": 133,
+  "maxObservedWorkerLagMs": 1099,
+  "maxObservedSettlementLagMs": 1168,
+  "maxObservedExpiryLagMs": 722,
+  "lockSamples": 1194,
   "payoutReceipts": 40,
   "finalFills": 1060,
+  "activeMintOperations": 70,
+  "activeHoldings": [
+    {
+      "outcome": "NO",
+      "quantity": "1060"
+    },
+    {
+      "outcome": "YES",
+      "quantity": "1060"
+    }
+  ],
+  "financialWritesApplied": true,
   "workerRestartNoDuplicates": true,
   "reconciliation": "pass",
   "passed": true

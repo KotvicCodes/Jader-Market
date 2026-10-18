@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { access, rm } from 'node:fs/promises';
+import { access, readFile, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import { test, expect } from '@playwright/test';
 
@@ -21,6 +21,10 @@ test('interrupted acceptance cleans up its database, app, worker and subprocess 
     owned=JSON.parse(output.split('\n').find(line=>line.startsWith('{'))!);
     descendant=Number(output.match(/grandchild:(\d+)/)![1]);
     expect((await fetch(`${owned!.origin}/api/health`)).ok).toBe(true);
+    await expect.poll(async()=>{
+      try{return Boolean(JSON.parse(await readFile(`${owned!.directory}/worker-status.json`,'utf8')).lastSuccess);}
+      catch{return false;}
+    }).toBe(true);
     const closed=once(child,'close',{signal:AbortSignal.timeout(20000)});child.kill('SIGTERM');
     const [code]=await closed;expect(code).toBe(143);
     expect(spawnSync('docker',['inspect',owned!.container],{stdio:'ignore'}).status).not.toBe(0);
