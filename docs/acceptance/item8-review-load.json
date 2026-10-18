@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-10-18T12:14:55.499Z",
+  "applicationVersion": "0.1.15",
+  "profile": {
+    "participants": 20,
+    "concurrency": 10,
+    "historicalTrades": 1000,
+    "roundsPerVirtualUser": 60,
+    "thinkTimeMs": 1000,
+    "p95ReadMs": 1000,
+    "p95WriteMs": 2000,
+    "maxLockWaitMs": 500,
+    "maxWorkerLagMs": 5000
+  },
+  "environment": {
+    "platform": "linux",
+    "architecture": "arm64",
+    "node": "v22.22.1",
+    "logicalCpus": 10,
+    "memoryBytes": 8452653056
+  },
+  "durationMs": 63048,
+  "readRequests": 1200,
+  "writeRequests": 120,
+  "unexpectedErrors": 0,
+  "samplingErrors": 0,
+  "p95ReadMs": 32,
+  "p95WriteMs": 99,
+  "maxObservedLockWaitMs": 49,
+  "maxSamplingGapMs": 59,
+  "clockDriftMs": 2,
+  "lockWaitUpperBoundMs": 111,
+  "maxObservedWorkerLagMs": 1095,
+  "maxObservedSettlementLagMs": 1196,
+  "maxObservedExpiryLagMs": 575,
+  "lockSamples": 1199,
+  "payoutReceipts": 40,
+  "finalFills": 1060,
+  "activeMintOperations": 70,
+  "activeHoldings": [
+    {
+      "outcome": "NO",
+      "quantity": "1060"
+    },
+    {
+      "outcome": "YES",
+      "quantity": "1060"
+    }
+  ],
+  "financialWritesApplied": true,
+  "workerRestartNoDuplicates": true,
+  "reconciliation": "pass",
+  "passed": true
+}

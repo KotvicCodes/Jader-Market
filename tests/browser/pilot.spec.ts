@@ -136,8 +136,22 @@ test('administrator and two participants complete the fictional-credit pilot',as
     const close=admin.locator('form').filter({has:admin.getByRole('button',{name:'Close market'})});await check(close.getByRole('checkbox'));await click(close.getByRole('button',{name:'Close market'}));
     await expect(admin.getByRole('button',{name:'Record final resolution'})).toBeVisible();
     const resolve=admin.locator('form').filter({has:admin.getByRole('button',{name:'Record final resolution'})});await select(resolve.getByLabel('Final result'),'YES');await fill(resolve.getByLabel('Public evidence'),'Verified fictional browser record: the synthetic test succeeded.');await check(resolve.getByRole('checkbox'));await click(resolve.getByRole('button',{name:'Record final resolution'}));
-    for(const page of [seller,buyer]){
-      await page.goto('/portfolio');await expect(page.locator('#payouts tbody tr')).not.toHaveCount(0,{timeout:20000});await expect(page.locator('#open-orders')).toContainText('No open orders');await audit(page);
+    for(const [page,balance,receipts] of [[seller,'98.50',2],[buyer,'101.50',1]] as const){
+      await page.goto('/portfolio');
+      await expect(page.locator('#payouts tbody tr')).toHaveCount(receipts,{timeout:20000});
+      await expect(page.locator('.balance-grid section').filter({has:page.getByText('Available credits',{exact:true})}).locator('strong')).toHaveText(balance);
+      await expect(page.locator('.balance-grid section').filter({has:page.getByText('Reserved credits',{exact:true})}).locator('strong')).toHaveText('0.00');
+      await expect(page.locator('#holdings tbody tr')).toHaveCount(0);
+      await expect(page.locator('#open-orders')).toContainText('No open orders');
+      const paid=page.locator('#payouts tbody tr').filter({has:page.getByRole('cell',{name:'YES / YES',exact:true})});
+      await expect(paid.getByRole('cell').nth(3)).toHaveText('2');
+      await expect(paid.getByRole('cell').nth(4)).toHaveText('2.00');
+      if(page===seller){
+        const lost=page.locator('#payouts tbody tr').filter({has:page.getByRole('cell',{name:'NO / YES',exact:true})});
+        await expect(lost.getByRole('cell').nth(3)).toHaveText('4');
+        await expect(lost.getByRole('cell').nth(4)).toHaveText('0.00');
+      }
+      await audit(page);
     }
     await seller.goto('/account');await click(seller.getByRole('button',{name:'Sign out all sessions'}));await expect(seller.getByRole('heading',{name:'Sign in',exact:true})).toBeVisible();
     expect(errors).toEqual([]);

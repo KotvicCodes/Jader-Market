@@ -18,8 +18,10 @@ import { readWorkerStatus } from '../src/domain/worker-status';
 export const syntheticPassword = 'fictional-acceptance-password-2026';
 const executing = new Set<ChildProcess>();
 const processGroups = new WeakSet<ChildProcess>();
+const closedProcesses = new WeakSet<ChildProcess>();
 function managed(child: ChildProcess) {
   if (process.platform !== 'win32') processGroups.add(child);
+  child.once('close', () => closedProcesses.add(child));
   return child;
 }
 export async function execute(command: string, args: string[], env = process.env, onOutput?: (text:string)=>void, timeoutMs = 60000) {
@@ -34,20 +36,30 @@ export async function execute(command: string, args: string[], env = process.env
     if (timedOut) throw new Error('acceptance_subprocess_timeout');
     if (code !== 0) throw new Error('acceptance_subprocess_failed');
     return output;
-  } finally { clearTimeout(timeout); executing.delete(child); }
+  } finally {
+    clearTimeout(timeout);
+    try { await stop(child); } finally { executing.delete(child); }
+  }
 }
 async function stop(child?: ChildProcess) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (!child) return;
+  const group = child.pid && processGroups.has(child);
+  if (!group && closedProcesses.has(child)) return;
   const signal = (value:NodeJS.Signals) => {
     try {
-      if (child.pid && processGroups.has(child)) process.kill(-child.pid,value);
+      if (group) process.kill(-child.pid!,value);
       else child.kill(value);
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
   };
-  const closed = once(child,'close');
+  // An exited group leader can still have descendants holding its pipes open.
+  const closed = closedProcesses.has(child) ? Promise.resolve() : once(child,'close');
   signal('SIGTERM');
   const force = setTimeout(() => signal('SIGKILL'), 10000);
-  try { await closed; } finally { clearTimeout(force); }
+  try { await closed; } finally {
+    clearTimeout(force);
+    // Descendants with independent stdio may outlive the leader's close event.
+    if (group) signal('SIGKILL');
+  }
 }
 async function unusedPort() {
   const server = createServer(); server.listen(0,'127.0.0.1'); await once(server,'listening');
