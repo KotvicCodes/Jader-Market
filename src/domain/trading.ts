@@ -1,8 +1,8 @@
 import { MemberError } from "./identity";
 import { marketUuid } from "./market-admin";
+import { creditTicks, maxQuantity } from "./trading-values";
 
-export const creditTicks = 10_000n;
-export const maxQuantity = 1_000_000n;
+export { creditTicks, maxQuantity } from "./trading-values";
 export const maxOpenOrders = 100;
 export const maxMarketOrders = 200;
 export type Outcome = "YES" | "NO";
