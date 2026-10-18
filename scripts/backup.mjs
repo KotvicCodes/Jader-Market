@@ -41,12 +41,33 @@ async function backup(o) {
   if (container.Config.Labels['com.docker.compose.project'] !== o.project || container.Config.Labels['com.docker.compose.service'] !== 'db') throw new Error('database_identity');
   const [image] = JSON.parse(await docker(['image', 'inspect', config.JADER_IMAGE], { capture: true }));
   if (!/^sha256:[a-f0-9]{64}$/.test(image.Id)) throw new Error('release_image_required');
+  // A valid env file can still be stale. Bind its key and image to the deployed
+  // release, including stopped containers retained during a fenced upgrade.
+  const releases = (await command('docker', [...compose, 'ps', '--all', '-q', 'app', 'worker', 'monitor'], { env, capture: true })).trim().split(/\s+/);
+  if (!releases.every(id => /^[a-f0-9]{12,64}$/.test(id))) throw new Error('source_release_required');
+  const services = JSON.parse(await docker(['inspect', ...releases], { capture: true }));
+  const sourceUrl = new URL(config.JADER_RUNTIME_DATABASE_URL);
+  if (!['postgres:', 'postgresql:'].includes(sourceUrl.protocol) || sourceUrl.hostname !== 'db' ||
+      (sourceUrl.port && sourceUrl.port !== '5432') || sourceUrl.pathname !== '/jader_market' ||
+      sourceUrl.username !== 'jader_runtime' || sourceUrl.search || sourceUrl.hash) throw new Error('source_database_mismatch');
+  if (!services.some(c => c.Config.Labels['com.docker.compose.service'] === 'app') || services.some(c =>
+    c.Config.Labels['com.docker.compose.project'] !== o.project ||
+    !['app', 'worker', 'monitor'].includes(c.Config.Labels['com.docker.compose.service']) || c.Image !== image.Id ||
+    !c.Config.Env.includes(`AUTH_SECRET=${config.AUTH_SECRET}`) ||
+    !c.Config.Env.includes(`DATABASE_URL=${config.JADER_RUNTIME_DATABASE_URL}`))) throw new Error('source_release_mismatch');
   await mkdir(join(o.directory, '.backup-lock'), { mode: 0o700 });
   const name = `backup-${Date.now()}-${randomBytes(8).toString('hex')}.jmb`, target = join(o.directory, name), partial = `${target}.partial`;
   let source;
   try {
     source = dump(['exec', id, 'pg_dump', '-U', 'jader_owner', '-d', 'jader_market', '-Fc', '--no-owner', '--no-acl', '--lock-wait-timeout=30s'], hostEnv);
-    await Promise.all([seal(source.stream, partial, key, { format: 1, startedAt: new Date().toISOString(), image: config.JADER_IMAGE, imageId: image.Id, authSecret: config.AUTH_SECRET, postgres: '17.6', database: 'jader_market' }), source.done]);
+    const sealing = seal(source.stream, partial, key, { format: 1, startedAt: new Date().toISOString(), image: config.JADER_IMAGE, imageId: image.Id, authSecret: config.AUTH_SECRET, postgres: '17.6', database: 'jader_market' });
+    try { await Promise.all([sealing, source.done]); }
+    catch (error) {
+      source.cancel(); source.stream.destroy();
+      // Finish both operations before deleting the partial or releasing the lock.
+      await Promise.allSettled([sealing, source.done]);
+      throw error;
+    }
     // link fails rather than replacing any existing backup.
     await link(partial, target); await rm(partial); await syncDirectory(o.directory);
     await command(o.replicate, [resolve(target)], { env: hostEnv });
@@ -84,7 +105,9 @@ async function restore(o) {
   let created = false, success = false;
   try {
     const { metadata, offset } = await unseal(o.archive, staging, key);
-    const [release] = JSON.parse(await docker(['image', 'inspect', metadata.image], { capture: true }));
+    // A mutable tag may have moved since the backup. The preserved immutable
+    // artifact is authoritative; never substitute the tag's current contents.
+    const [release] = JSON.parse(await docker(['image', 'inspect', metadata.imageId], { capture: true }));
     if (release.Id !== metadata.imageId) throw new Error('release_image_mismatch');
     const password = randomBytes(32).toString('hex');
     const environment = join(o.output, 'recovery.env');
@@ -92,7 +115,7 @@ async function restore(o) {
       JADER_OWNER_PASSWORD: randomBytes(32).toString('hex'), JADER_RUNTIME_PASSWORD: randomBytes(32).toString('hex'), AUTH_SECRET: metadata.authSecret }), { mode: 0o600, flag: 'wx' });
     await docker(['create', '--name', name, '--network', 'none', '--label', 'jader.recovery=isolated', '--env-file', environment,
       '--mount', `type=bind,src=${resolve('deploy/init-db.sh')},dst=/docker-entrypoint-initdb.d/10-roles.sh,readonly`,
-      'postgres:17.6-alpine', 'postgres', '-c', 'log_statement=none', '-c', 'log_min_error_statement=panic']);
+      'postgres:17.6-alpine', 'postgres', '-c', 'log_statement=none', '-c', 'log_min_error_statement=panic', '-c', 'log_min_messages=panic']);
     created = true; await docker(['start', name]);
     let ready = false;
     for (let i=0; i<60; i++) {
