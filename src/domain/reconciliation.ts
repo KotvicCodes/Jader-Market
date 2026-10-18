@@ -13,8 +13,12 @@ export type ExternalRegister = {
   payments: PaymentEvidence[];
 };
 
-// This is an independently verified, lifetime register of confirmed marketplace
-// transfers, not an export of the application's own payment assertions.
+/**
+ * Validate a complete lifetime receipt register and normalize its target UUIDs.
+ * The operator must independently verify transfers; parsing does not establish
+ * payment authenticity or correct recipient mapping.
+ * @throws An error with the fixed message invalid_external_register for invalid evidence.
+ */
 export function parseExternalRegister(input: unknown): ExternalRegister {
   const invalid = () => { throw new Error("invalid_external_register"); };
   if (!input || typeof input !== "object" || Array.isArray(input)) return invalid();
@@ -48,6 +52,7 @@ export function parseExternalRegister(input: unknown): ExternalRegister {
   return { version: 1, complete: true, reviewedAt: value.reviewedAt, payments };
 }
 
+/** Map complete, discrepant and internally clean but unchecked reports to CLI exit codes 0, 1 and 2. */
 export function reconciliationExitCode(status: "pass" | "fail" | "incomplete") {
   return status === "pass" ? 0 : status === "fail" ? 1 : 2;
 }

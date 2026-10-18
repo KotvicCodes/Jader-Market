@@ -13,6 +13,7 @@ export type ReconciliationCheck = {
   truncated: boolean;
 };
 
+/** Count every failing row and retain at most 25 deterministic samples in the report. */
 async function check(tx: Transaction, name: string, query: SQL): Promise<ReconciliationCheck> {
   const [result] = await tx.execute(sql`
     WITH failures AS MATERIALIZED (${query})
@@ -21,6 +22,7 @@ async function check(tx: Transaction, name: string, query: SQL): Promise<Reconci
   return { name, discrepancies: result.count as string, samples: result.samples as ReconciliationCheck["samples"], truncated: BigInt(result.count as string)>25n };
 }
 
+/** Match lifetime receipt evidence in both directions without exposing payment references in failures. */
 function externalPayments(register: ExternalRegister) {
   return sql`
     WITH evidence AS (
@@ -45,8 +47,13 @@ function externalPayments(register: ExternalRegister) {
       OR (r.reference IS NOT NULL AND r.reference<>e.reference)`;
 }
 
-// No writes, repairs, authentication secrets, or application advisory lock. All
-// scans share one MVCC snapshot, even while trading/settlement commits continue.
+/**
+ * Report accounting discrepancies from one read-only repeatable-read snapshot.
+ * A complete pass requires a supplied independent receipt register. The report
+ * omits authentication secrets and payment references, performs no repairs and
+ * takes no application advisory lock while financial writes continue.
+ * @throws If the register, database readiness or query execution is invalid/unavailable.
+ */
 export async function reconcileDatabase(db: Database, externalInput?: ExternalRegister) {
   const register = externalInput === undefined ? undefined : parseExternalRegister(externalInput);
   return db.transaction(async tx => {

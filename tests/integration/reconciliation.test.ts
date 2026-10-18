@@ -41,18 +41,23 @@ const trade = (token: string, action: TradingAction, id: string, fields = {}) =>
 const withdrawal = (token: string, action: WithdrawalAction, row: Record<string,unknown>, fields = {}) => mutateWithdrawal(token,action,{
   id: row.id, previousOperationId: row.lastOperationId, operationKey: randomUUID(), confirmed: true, ...fields,
 });
+/** Create an independent open market for synthetic trading and settlement fixtures. */
 async function market() {
   const [m] = await connection.db.insert(markets).values({ slug: randomUUID(), question: "Will the fictional reconciliation rehearsal pass?", description: "Synthetic accounting verification.", category: "community", resolutionRules: "Resolve YES if the synthetic record confirms success, otherwise NO.", resolutionSource: "Synthetic test record", status: "open", publishedAt: new Date(), closesAt: new Date("2035-12-31T12:00:00Z") }).returning();
   return m.id;
 }
+/** Require every internal check and the independent synthetic receipt register to reconcile. */
 async function assertClean() {
   const report = await reconcileDatabase(connection.db,register());
   expect(report.checks.filter(c => c.discrepancies!=="0")).toEqual([]);
   expect(report.status).toBe("pass");
   return report;
 }
-// Only this disposable database is privileged. Inject faults behind the guards,
-// then restore their original values; production reconciliation never does this.
+/**
+ * Inject a fault behind guards only in this privileged disposable database,
+ * require the expected discrepancies and restore the fixture even on failure.
+ * Production reconciliation never bypasses guards or repairs records.
+ */
 async function corrupt(change: SQL, repair: SQL, expected: string[]) {
   const apply = (query: SQL) => connection.db.transaction(async tx => {
     await tx.execute(sql`SET LOCAL session_replication_role = replica`);
@@ -67,6 +72,7 @@ async function corrupt(change: SQL, repair: SQL, expected: string[]) {
   } finally { await apply(repair); }
   await assertClean();
 }
+/** Run the portable reconciliation CLI and capture its process status and output for assertions. */
 async function command(args: string[] = []) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve,reject) => {
     const child = spawn(process.execPath,["scripts/run.mjs","node","--import","./scripts/register-typescript.mjs","scripts/reconcile.ts",...args],{ env: process.env });
