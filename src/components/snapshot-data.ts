@@ -1,6 +1,6 @@
 import type { MarketSnapshot } from "../db/market-snapshot";
 import type { portfolioSnapshot } from "../db/portfolio";
-import { SnapshotSessionError } from "./live-snapshot";
+import { SnapshotSessionError } from "./snapshot-session";
 
 export type PortfolioSnapshot = Awaited<ReturnType<typeof portfolioSnapshot>> & { csrf: string };
 type Check = (value: unknown) => boolean;

@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { SnapshotSessionError } from "./snapshot-session";
+
+export { SnapshotSessionError } from "./snapshot-session";
 
 export const pollInterval = 10_000;
 export const snapshotTimeout = 8_000;
@@ -10,7 +13,6 @@ type Phase = "current" | "checking" | "offline" | "hidden" | "error" | "session"
 type RefreshControl = { fresh: boolean; refresh: () => void };
 export const SnapshotRefreshContext = createContext<RefreshControl | null>(null);
 export const useSnapshotRefresh = () => useContext(SnapshotRefreshContext);
-export class SnapshotSessionError extends Error {}
 
 export async function fetchSnapshot<T>(url: string, signal: AbortSignal, read: (value: unknown) => T): Promise<T> {
   const response = await fetch(url, { signal, credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });

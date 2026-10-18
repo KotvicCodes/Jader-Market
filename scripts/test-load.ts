@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { eq } from 'drizzle-orm';
 import { startAcceptance } from './acceptance-environment';
 import { lockWaitBounds } from './acceptance-metrics';
+import { assertLoadReadResponse } from './acceptance-response';
 import { getDatabase } from '../src/db/client';
 import { adjustCredits } from '../src/db/members';
 import { mutateTrading } from '../src/db/trading';
@@ -88,8 +89,10 @@ try{
     try{
       const response=await fetch(`${env!.origin}${path}`,{method:body?'POST':'GET',signal:AbortSignal.timeout(10000),headers:{Cookie:`jader_session=${actor.token}; jader_csrf=${actor.csrf}`,
         ...(body?{'Content-Type':'application/json',Origin:env!.origin,'X-CSRF-Token':actor.csrf,'X-Account-ID':actor.id}:{})},body:body?JSON.stringify(body):undefined});
-      await response.arrayBuffer();if(!response.ok)throw new Error('unexpected_http_status');
-      if(body)measuredWrites++;
+      if(body){
+        await response.arrayBuffer();if(!response.ok)throw new Error('unexpected_http_status');
+        measuredWrites++;
+      }else await assertLoadReadResponse(response,path==='/api/account/portfolio'?'portfolio':'market',actor);
     }catch{unexpectedErrors++;}
     finally{(body?writes:reads).push(performance.now()-started);}
   };
