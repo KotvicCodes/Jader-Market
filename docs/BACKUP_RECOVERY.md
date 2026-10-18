@@ -58,7 +58,11 @@ Recovery checks cover database readiness/guards, ledger and holding projections,
 
 After validation, **all restored sessions are deleted**. Old cookies, including previously revoked sessions resurrected by an older snapshot, must fail. Users sign in again; MFA enrollment and replay-counter state remain from the snapshot, so clock synchronization and fresh TOTP codes are required. Pending MFA enrollments disappear with their revoked sessions and can be restarted after sign-in. Password changes, MFA changes, suspension and other security decisions after the snapshot may have been lost: independently reapply them or require account credential recovery before reopening. Never reset MFA merely to make verification pass.
 
-The new private directory contains `restore.json` (container/release identity and verification state), `recovery.env` (fresh DB credentials and matching authentication key), `owner.env` and `runtime.env` (loopback URLs usable only from that container's network namespace). Do not paste these into chat. To run further tools without exposing ports, use the recorded container name and exact release image:
+The new private directory contains `restore.json` (container/release identity and verification state), `recovery.env` (fresh DB credentials and matching authentication key), `owner.env` and `runtime.env` (loopback URLs usable only from that container's network namespace). Do not paste these into chat.
+
+SIGINT/SIGTERM cancels the entire backup or restore operation, including readiness retries and time between subprocesses. A failed or cancelled restore checks for its exact randomly named, labelled container even if Docker accepted creation before its client returned, and removes that container before deleting its private directory. If Docker cannot confirm cleanup, the command fails and preserves the private directory; `pending-restore.json` (or a completed `restore.json`) records the container identity for cleanup after Docker recovers. Keep it isolated and follow the incident procedure below.
+
+To run further tools without exposing ports, use the recorded container name and exact release image:
 
 ```sh
 docker run --rm --network container:RECORDED_CONTAINER \

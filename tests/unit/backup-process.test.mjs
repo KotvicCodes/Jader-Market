@@ -7,6 +7,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { command, dump } from '../../scripts/backup/process.mjs';
 
+it('keeps operation cancellation across subprocess boundaries', async () => {
+  const controller = new AbortController();
+  const active = command(process.execPath, ['-e', `
+    process.on('SIGTERM', () => {});
+    setTimeout(() => process.exit(0), 1500);
+  `], { signal: controller.signal, killGraceMs: 100 });
+  const abort = setTimeout(() => controller.abort(), 150);
+  try { await expect(active).rejects.toThrow('command_interrupted'); }
+  finally { clearTimeout(abort); }
+  // A later command must not start just because the original child is gone.
+  await expect(command(process.execPath, ['-e', 'process.exit(0)'], { signal: controller.signal })).rejects.toThrow('command_interrupted');
+});
+
 it('rejects a timed-out command even if it handles SIGTERM and exits successfully', async () => {
   await expect(command(process.execPath, ['-e', `
     process.on('SIGTERM', () => process.exit(0));

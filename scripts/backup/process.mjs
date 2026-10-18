@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 
-function start(program, args, { env, input = true, timeoutMs = 1_800_000, killGraceMs = 10_000 }) {
+function start(program, args, { env, input = true, timeoutMs = 1_800_000, killGraceMs = 10_000, signal: abortSignal }) {
+  if (abortSignal?.aborted) throw new Error('command_interrupted');
   const group = process.platform !== 'win32';
   const child = spawn(program, args, { env, detached: group, stdio: [input ? 'pipe' : 'ignore', 'pipe', 'ignore'] });
   let closed = false, unavailable = false, timedOut = false, interrupted = false, stopping;
@@ -29,6 +30,7 @@ function start(program, args, { env, input = true, timeoutMs = 1_800_000, killGr
   const interrupt = () => { interrupted = true; void stop(); };
   process.once('SIGINT', interrupt);
   process.once('SIGTERM', interrupt);
+  abortSignal?.addEventListener('abort', interrupt, { once: true });
   const timeout = setTimeout(() => { timedOut = true; void stop(); }, timeoutMs);
   const done = finished.then(code => {
     if (unavailable) throw new Error('command_unavailable');
@@ -40,6 +42,7 @@ function start(program, args, { env, input = true, timeoutMs = 1_800_000, killGr
     try { await stop(); } finally {
       process.removeListener('SIGINT', interrupt);
       process.removeListener('SIGTERM', interrupt);
+      abortSignal?.removeEventListener('abort', interrupt);
     }
   });
   // Streaming callers can encounter an input/encryption error before awaiting done.
