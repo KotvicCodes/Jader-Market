@@ -16,12 +16,20 @@ if (!connection) {
 } else {
   try {
     do {
+      let passSucceeded = false;
       try {
         await expireTradingOrders();
         await settleMarkets();
-        if (process.env.WORKER_STATUS_FILE) await recordWorkerStatus(process.env.WORKER_STATUS_FILE, true);
-      } catch {
-        if (process.env.WORKER_STATUS_FILE) await recordWorkerStatus(process.env.WORKER_STATUS_FILE, false);
+        passSucceeded = true;
+      } catch { /* Record the maintenance outcome separately from status I/O. */ }
+      if (process.env.WORKER_STATUS_FILE) {
+        try {
+          await recordWorkerStatus(process.env.WORKER_STATUS_FILE, passSucceeded);
+        } catch {
+          console.error("Worker status could not be recorded.");
+        }
+      }
+      if (!passSucceeded) {
         if (process.argv.includes("--once")) throw new Error("maintenance_failed");
         console.error("Trading maintenance pass failed; retrying.");
       }

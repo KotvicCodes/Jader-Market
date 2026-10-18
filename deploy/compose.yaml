@@ -32,7 +32,9 @@ services:
       - ./init-db.sh:/docker-entrypoint-initdb.d/10-roles.sh:ro
     networks: [backend]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jader_bootstrap -d jader_market"]
+      # The entrypoint's temporary initialization server accepts Unix sockets
+      # before roles/scripts finish. Only the final server accepts TCP.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "jader_bootstrap", "-d", "jader_market"]
       interval: 5s
       timeout: 5s
       retries: 10

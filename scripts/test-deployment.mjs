@@ -13,6 +13,7 @@ const directory = mkdtempSync(join(tmpdir(), "jader-deployment-"));
 const project = `jader-proof-${randomBytes(5).toString("hex")}`;
 const environmentFile = join(directory, "test.env");
 const overrideFile = join(directory, "compose.yaml");
+const initializationGate = join(directory, "initialization-gate.sh");
 const password = randomBytes(24).toString("hex");
 const port = 32000 + Math.floor(Math.random() * 20000);
 let stage = "certificate setup";
@@ -59,9 +60,32 @@ try {
   run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
     "-keyout", join(directory, "privkey.pem"), "-out", join(directory, "fullchain.pem")]);
   writeFileSync(environmentFile, Object.entries(syntheticEnvironment).map(([key, value]) => `${key}=${value}\n`).join(""), { mode: 0o600 });
-  writeFileSync(overrideFile, `services:\n  proxy:\n    ports: !override ["127.0.0.1:${port}:443", "127.0.0.1:${port + 1}:80"]\n`, { mode: 0o600 });
+  // Hold the entrypoint's temporary Unix-socket server open so a health check
+  // cannot accidentally admit migrations before initialization has finished.
+  writeFileSync(initializationGate, "while [ ! -f /tmp/jader-initialization-released ]; do sleep 1; done\n", { mode: 0o644 });
+  writeFileSync(overrideFile, `services:\n  db:\n    volumes:\n      - ${initializationGate}:/docker-entrypoint-initdb.d/99-health-gate.sh:ro\n  proxy:\n    ports: !override ["127.0.0.1:${port}:443", "127.0.0.1:${port + 1}:80"]\n`, { mode: 0o600 });
   console.info("Checking isolated deployment initialization and migrations.");
   stage = "database initialization";
+  compose(["up", "-d", "db"]);
+  const dbId = compose(["ps", "-q", "db"]).trim();
+  let initializationObserved = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const logs = run("docker", ["logs", dbId]);
+    if (logs.includes("99-health-gate.sh")) { initializationObserved = true; break; }
+    await delay(1000);
+  }
+  assert.ok(initializationObserved, "Database must reach the initialization gate");
+  const [initializing] = JSON.parse(run("docker", ["inspect", dbId]));
+  const previousChecks = initializing.State.Health.Log.at(-1)?.Start;
+  let checkedDuringInitialization = false;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await delay(1000);
+    const [database] = JSON.parse(run("docker", ["inspect", dbId]));
+    assert.notEqual(database.State.Health.Status, "healthy", "Temporary initialization server must not admit migrations");
+    if (database.State.Health.Log.at(-1)?.Start !== previousChecks) { checkedDuringInitialization = true; break; }
+  }
+  assert.ok(checkedDuringInitialization, "Health check must run while initialization is held open");
+  compose(["exec", "-T", "db", "touch", "/tmp/jader-initialization-released"]);
   compose(["up", "-d", "--wait", "db"]);
   stage = "owner migrations and runtime grants";
   compose(["run", "--rm", "-T", "migrate"]);
@@ -117,6 +141,7 @@ try {
   console.info("Checking automatic worker restart after process exit.");
   stage = "automatic worker restart";
   const workerId = compose(["ps", "-q", "worker"]).trim();
+  const [beforeCrash] = JSON.parse(run("docker", ["inspect", workerId]));
   // Kill the supervised process inside the namespace. Docker's own `kill`
   // command counts as a manual stop and deliberately suppresses restarts.
   const crash = spawnSync("docker", [...baseArgs, "exec", "-T", "worker", "node", "-e",
@@ -127,7 +152,7 @@ try {
   for (let attempt = 0; attempt < 20; attempt++) {
     await delay(1000);
     const [worker] = JSON.parse(run("docker", ["inspect", workerId]));
-    if (worker.State.Running && worker.RestartCount >= 1) {
+    if (worker.State.Running && worker.RestartCount > beforeCrash.RestartCount) {
       const heartbeat = JSON.parse(compose(["exec", "-T", "worker", "node", "-e",
         "console.log(require('node:fs').readFileSync(process.env.WORKER_STATUS_FILE,'utf8'))"]));
       if (heartbeat.checkedAt >= Date.parse(worker.State.StartedAt)) { restarted = true; break; }
