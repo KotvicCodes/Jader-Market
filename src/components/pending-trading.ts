@@ -61,9 +61,8 @@ export function pendingTradingStore(ownerId: string, marketId: string) {
       notify();
       return true;
     },
-    save(request: TradingRequest | null) {
-      if (request) window.sessionStorage.setItem(key, JSON.stringify(request));
-      else window.sessionStorage.removeItem(key);
+    save(request: TradingRequest) {
+      window.sessionStorage.setItem(key, JSON.stringify(request));
       notify();
     },
   };

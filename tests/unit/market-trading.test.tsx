@@ -97,6 +97,52 @@ describe("participant trading controls", () => {
     expect(container.textContent).toContain("Order filled: 3 of 3 shares");
     expect(sessionStorage.getItem(key)).toBeNull();
   });
+  it.each(["success", "rejection"] as const)("preserves a newer trade after navigation when an old %s arrives late", async lateResult => {
+    await render();
+    await prepareBuy();
+    let finishOriginal!: (value: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(resolve => { finishOriginal = resolve; }));
+    await click("Confirm order");
+    const original = JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    // Client navigation replaces the component while its first fetch is pending.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    fetchMock.mockResolvedValueOnce(response({ order: { id: original.operationKey, quantity: "3", remaining: "0", status: "filled" } }));
+    await click("Retry same request");
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+    expect(sessionStorage.getItem(key)).toBeNull();
+
+    await prepareBuy();
+    let rejectNew!: (error: Error) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => { rejectNew = reject; }));
+    await click("Confirm order");
+    const newerPayload = fetchMock.mock.calls[2][1].body;
+    const newer = JSON.parse(newerPayload);
+    expect(newer.operationKey).not.toBe(original.operationKey);
+    const savedNewer = sessionStorage.getItem(key);
+    expect(JSON.parse(savedNewer!).body).toEqual(newer);
+
+    // Either terminal response for the old operation must leave the new one intact.
+    await act(async () => {
+      finishOriginal(lateResult === "success"
+        ? response({ order: { id: original.operationKey, quantity: "3", remaining: "0", status: "filled" } })
+        : response({ error: "insufficient_credits" }, 409));
+    });
+    const pendingAfterLateResponse = sessionStorage.getItem(key);
+    await act(async () => { rejectNew(new TypeError("Response lost after commit")); });
+    expect(pendingAfterLateResponse).toBe(savedNewer);
+    expect(sessionStorage.getItem(key)).toBe(savedNewer);
+    expect(button("Review order").matches(":disabled")).toBe(true);
+    expect(button("Retry same request").disabled).toBe(false);
+
+    fetchMock.mockResolvedValueOnce(response({ order: { id: newer.operationKey, quantity: "3", remaining: "0", status: "filled" } }));
+    await click("Retry same request");
+    expect(fetchMock.mock.calls[3][1].body).toBe(newerPayload);
+    expect(sessionStorage.getItem(key)).toBeNull();
+    expect(button("Review order").matches(":disabled")).toBe(false);
+  });
   it("retains an unconfirmed operation when the request times out", async () => {
     vi.useFakeTimers();
     try {
