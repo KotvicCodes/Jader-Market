@@ -91,7 +91,9 @@ it('rejects mint acknowledgements with the wrong action or quantity', async () =
 });
 
 it('rejects unusable order state and share quantities', async () => {
-  for (const changes of [{ status: 'unknown' }, { quantity: '0' }, { remaining: '-1' }, { remaining: '2' }]) {
+  for (const changes of [{ status: 'unknown' }, { quantity: '0' }, { remaining: '-1' }, { remaining: '2' },
+    { quantity: '2' }, { quantity: 1 }, { remaining: 0 }, { status: 'open' }, { status: 'open', remaining: '1' },
+    { status: 'filled', remaining: '1' }, { status: 'cancelled' }, { status: 'expired' }]) {
     await expect(assertLoadWriteResponse(response({ order: { ...orderResult().order, ...changes } }), place)).rejects.toThrow();
   }
 });
@@ -115,4 +117,6 @@ it('also preserves the UI result contract for burn and cancellation requests', a
   await expect(assertLoadWriteResponse(response({ ...mintResult(), action: 'burn' }), burn)).resolves.toBeUndefined();
   const cancel: TradingRequest = { action: 'cancel', body: { marketId: mint.body.marketId, operationKey: 'cancel-operation', orderId: place.body.operationKey } };
   await expect(assertLoadWriteResponse(response(orderResult()), cancel)).resolves.toBeUndefined();
+  await expect(assertLoadWriteResponse(response({ order: { ...orderResult().order, status: 'cancelled', remaining: '1' } }), cancel)).resolves.toBeUndefined();
+  await expect(assertLoadWriteResponse(response({ order: { ...orderResult().order, status: 'open', remaining: '1' } }), cancel)).rejects.toThrow();
 });

@@ -188,6 +188,27 @@ describe("participant trading controls", () => {
     expect(container.textContent).toContain("Browser session storage must be available");
     setItem.mockRestore();
   });
+  it("preserves the exact pending request when an acknowledgement changes its quantity", async () => {
+    await render();
+    await prepareBuy();
+    fetchMock.mockImplementationOnce(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      return response({ order: { id: body.operationKey, quantity: "4", remaining: "0", status: "filled" } });
+    });
+    await click("Confirm order");
+    const original = fetchMock.mock.calls[0][1].body;
+    expect(JSON.parse(sessionStorage.getItem(key)!).body).toEqual(JSON.parse(original));
+    expect(container.textContent).toContain("result is unconfirmed");
+    expect(refresh).not.toHaveBeenCalled();
+    fetchMock.mockImplementationOnce(async (_url, options) => {
+      expect(options.body).toBe(original);
+      const body = JSON.parse(options.body);
+      return response({ order: { id: body.operationKey, quantity: "3", remaining: "0", status: "filled" } });
+    });
+    await click("Retry same request");
+    expect(sessionStorage.getItem(key)).toBeNull();
+    expect(container.textContent).toContain("Order filled: 3 of 3 shares");
+  });
   it("blocks a corrupt saved request instead of silently allowing a new trade", async () => {
     sessionStorage.setItem(key, "broken-json");
     await render();

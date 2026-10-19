@@ -6,7 +6,7 @@ import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import { eq } from 'drizzle-orm';
 import { startAcceptance } from './acceptance-environment';
-import { lockWaitBounds } from './acceptance-metrics';
+import { lockWaitBounds, oldestSettlementLagMs } from './acceptance-metrics';
 import { assertLoadReadResponse, assertLoadWriteResponse } from './acceptance-response';
 import type { TradingRequest } from '../src/domain/trading-ticket';
 import { getDatabase } from '../src/db/client';
@@ -74,7 +74,11 @@ try{
       lockSamples.push(locks.waitMs);sampleTimes.push(locks.sampledAt);monotonicSampleTimes.push(performance.now());
       const status=await operationsSnapshot(runtime!.db,env!.runtimeEnvironment.WORKER_STATUS_FILE);
       if(status.workerAgeSeconds===null||status.consecutiveFailures!==0)throw new Error('worker_unavailable');
-      workerSamples.push(status.workerAgeSeconds*1000);settlementSamples.push(status.settlementLagSeconds*1000);expirySamples.push(status.expiryLagSeconds*1000);
+      workerSamples.push(status.workerAgeSeconds*1000);
+      // Operations monitoring measures time since progress, while capacity
+      // acceptance must bound how long the oldest remaining payout has waited.
+      settlementSamples.push(await oldestSettlementLagMs(runtime!.db));
+      expirySamples.push(status.expiryLagSeconds*1000);
     }catch{samplingErrors++;}finally{samplingBusy=false;}
   }
   env.startWorker();

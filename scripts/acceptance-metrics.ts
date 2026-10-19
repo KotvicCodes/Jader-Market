@@ -1,3 +1,14 @@
+import { sql } from 'drizzle-orm';
+import type { Database } from '../src/db/transaction-lock';
+
+/** Remaining payouts retain their original queue age when another batch completes. */
+export async function oldestSettlementLagMs(db: Database) {
+  const [row] = await db.execute<{ lag: number }>(sql`
+    SELECT coalesce(max(extract(epoch FROM clock_timestamp() - r.created_at) * 1000), 0)::float8 AS lag
+    FROM markets m JOIN market_resolutions r ON r.market_id = m.id WHERE m.status = 'settling'`);
+  return row.lag;
+}
+
 /** Bound missed lock observations and observed wall-clock movement with monotonic time. */
 export function lockWaitBounds(waits:number[],wallTimes:number[],monotonicTimes:number[]) {
   if(waits.length<2||waits.length!==wallTimes.length||waits.length!==monotonicTimes.length||
