@@ -1,6 +1,6 @@
 {
   "name": "jader-market",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "type": "module",
   "engines": {
@@ -28,7 +28,9 @@
     "ops:check": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/operations.ts",
     "test:deployment": "node scripts/test-deployment.mjs",
     "backup": "node scripts/backup.mjs",
-    "test:recovery": "node scripts/test-recovery.mjs"
+    "test:recovery": "node scripts/test-recovery.mjs",
+    "test:browser": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/test-browser.ts",
+    "test:load": "node scripts/run.mjs node --import ./scripts/register-typescript.mjs scripts/test-load.ts"
   },
   "dependencies": {
     "dotenv": "18.0.5",
@@ -39,6 +41,8 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",

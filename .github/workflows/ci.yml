@@ -51,6 +51,9 @@ jobs:
       - run: npm run test:integration
       - run: npm run build
       - run: npm run test:http
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: npm run test:load
       - run: docker build -f deploy/Dockerfile -t jader-market:deployment-test .
       - run: npm run test:deployment
       - run: npm run test:recovery

@@ -88,4 +88,4 @@ The test creates a randomly named, disposable Compose project, distinct syntheti
 
 Local verification on 18 October 2026 (0.1.13): type checking, lint, 158 unit/component tests, 125 PostgreSQL integration tests, production build and restricted-role production HTTP workflows passed. The Docker image built, and the isolated Compose/TLS rehearsal passed all checks above, including automatic process restart and stopped-worker alert/recovery. Fixtures used disposable databases/projects; existing records and external payments were not used. This evidence covers the local deployment recipe, not an actual production host.
 
-The [follow-up PR review](PR_13_FOLLOWUP_REVIEW.md) adds a deterministic startup regression: hold the database initializer open, verify that a health check rejects the temporary server, then release initialization and complete the deployment rehearsal.
+The deployment rehearsal holds the database initializer open, verifies that a health check rejects the temporary server, then releases initialization and completes the deployment checks.

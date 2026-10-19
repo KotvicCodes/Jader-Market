@@ -15,6 +15,7 @@ import { holdings, ledgerAccounts, marketPayouts, marketResolutions, markets, se
 import { digest, encryptSecret, randomToken } from "../../src/domain/identity";
 import { legacyCredit, legacyMintAndAsk } from "../fixtures/legacy-trading";
 import type { TradingAction } from "../../src/domain/trading";
+import { oldestSettlementLagMs } from "../../scripts/acceptance-metrics";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.endsWith("_test")) throw new Error("A dedicated test database is required.");
@@ -145,8 +146,12 @@ describe("immutable resolution and restartable collateral payouts", () => {
     await manageParticipant(admin, ids.get(alice), "suspend");
     const before = await balance(alice);
     await expect(payoutHistory(alice, 1)).rejects.toMatchObject({ code: "unauthenticated" });
+    await connection.client`SELECT pg_sleep(0.05)`;
+    const queueAgeBefore = await oldestSettlementLagMs(connection.db);
+    expect(queueAgeBefore).toBeGreaterThanOrEqual(40);
     await settleMarkets();
     expect((await connection.db.select().from(markets).where(eq(markets.id, id)))[0].status).toBe("settling");
+    expect(await oldestSettlementLagMs(connection.db)).toBeGreaterThanOrEqual(queueAgeBefore);
     let receipts = await connection.db.select().from(marketPayouts).where(eq(marketPayouts.resolutionId, (await connection.db.select().from(marketResolutions).where(eq(marketResolutions.marketId, resolution.id)))[0].id));
     expect(receipts.every(p => p.quantity === 1000000n)).toBe(true);
     expect(receipts).toHaveLength(2);
@@ -155,6 +160,7 @@ describe("immutable resolution and restartable collateral payouts", () => {
     receipts = await connection.db.select().from(marketPayouts).where(eq(marketPayouts.resolutionId, receipts[0].resolutionId));
     expect(receipts).toHaveLength(4);
     await verifyConservation(id);
+    expect(await oldestSettlementLagMs(connection.db)).toBe(0);
     await manageParticipant(admin, ids.get(alice), "resume");
   });
   it("rolls back an interrupted batch and resumes once after a worker failure", async () => {

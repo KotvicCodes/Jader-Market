@@ -71,9 +71,12 @@ export function tradingResult(request: TradingRequest, data: Record<string, unkn
     return `${request.action === "mint" ? "Minted" : "Burned"} ${data.quantity} complete sets.`;
   }
   const order = data.order as { id?: unknown; status?: unknown; quantity?: unknown; remaining?: unknown; reason?: unknown } | undefined;
-  if (!order || order.id !== (request.action === "cancel" ? request.body.orderId : request.body.operationKey) || !["open", "filled", "cancelled", "expired"].includes(String(order.status)) || !/^[1-9][0-9]{0,6}$/.test(String(order.quantity)) || !/^(0|[1-9][0-9]{0,6})$/.test(String(order.remaining))) throw new Error("Unrecognized result");
-  const filled = BigInt(String(order.quantity)) - BigInt(String(order.remaining));
-  if (filled < 0n) throw new Error("Unrecognized result");
+  if (!order || order.id !== (request.action === "cancel" ? request.body.orderId : request.body.operationKey) || !["open", "filled", "cancelled", "expired"].includes(String(order.status)) || typeof order.quantity !== "string" || !/^[1-9][0-9]{0,6}$/.test(order.quantity) || typeof order.remaining !== "string" || !/^(0|[1-9][0-9]{0,6})$/.test(order.remaining)) throw new Error("Unrecognized result");
+  const quantity = BigInt(order.quantity), remaining = BigInt(order.remaining);
+  const filled = quantity - remaining;
+  if (quantity > maxQuantity || filled < 0n || (order.status === "filled") !== (remaining === 0n) ||
+      (request.action === "place" && (order.quantity !== request.body.quantity || request.body.timeInForce === "IOC" && order.status === "open")) ||
+      (request.action === "cancel" && order.status === "open")) throw new Error("Unrecognized result");
   const reason = order.reason === "self_trade" ? " Matching your own order is prevented." : "";
   if (order.status === "open") return `Order saved: ${filled} of ${order.quantity} shares filled; ${order.remaining} remain open and reserved.`;
   if (order.status === "filled") return `Order filled: ${filled} of ${order.quantity} shares.${request.action === "cancel" ? " It completed before cancellation; no shares remained to cancel." : ""}`;

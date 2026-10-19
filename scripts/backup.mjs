@@ -6,10 +6,20 @@ import { join, resolve, isAbsolute } from 'node:path';
 import { Readable } from 'node:stream';
 import { parse } from 'dotenv';
 import { privatePath, readKey, seal, unseal } from './backup/archive.mjs';
-import { command, dump } from './backup/process.mjs';
+import { command as runCommand, dump } from './backup/process.mjs';
 
 const day = 86400000;
 const archiveName = /^backup-\d{13}-[a-f0-9]{16}\.jmb$/;
+// Cancellation belongs to the whole operation, including file I/O and retry
+// delays between subprocesses. Cleanup deliberately uses an uncancelled command.
+const cancellation = new AbortController();
+const interrupt = () => cancellation.abort();
+process.on('SIGINT', interrupt);
+process.on('SIGTERM', interrupt);
+function assertActive() { if (cancellation.signal.aborted) throw new Error('operation_interrupted'); }
+function command(program, args, options = {}) {
+  return runCommand(program, args, { ...options, signal: cancellation.signal });
+}
 // An explicit env file is authoritative; ambient Compose/configuration cannot redirect operations.
 const hostEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
   !key.startsWith('COMPOSE_') && !key.startsWith('JADER_') && !['AUTH_SECRET','DATABASE_URL','PGHOST','PGPASSWORD','PGSERVICE'].includes(key)));
@@ -59,18 +69,20 @@ async function backup(o) {
   const name = `backup-${Date.now()}-${randomBytes(8).toString('hex')}.jmb`, target = join(o.directory, name), partial = `${target}.partial`;
   let source;
   try {
-    source = dump(['exec', id, 'pg_dump', '-U', 'jader_owner', '-d', 'jader_market', '-Fc', '--no-owner', '--no-acl', '--lock-wait-timeout=30s'], hostEnv);
+    source = dump(['exec', id, 'pg_dump', '-U', 'jader_owner', '-d', 'jader_market', '-Fc', '--no-owner', '--no-acl', '--lock-wait-timeout=30s'], hostEnv, { signal: cancellation.signal });
     const sealing = seal(source.stream, partial, key, { format: 1, startedAt: new Date().toISOString(), image: config.JADER_IMAGE, imageId: image.Id, authSecret: config.AUTH_SECRET, postgres: '17.6', database: 'jader_market' });
     try { await Promise.all([sealing, source.done]); }
     catch (error) {
-      source.cancel(); source.stream.destroy();
+      source.stream.destroy(); await source.cancel();
       // Finish both operations before deleting the partial or releasing the lock.
       await Promise.allSettled([sealing, source.done]);
       throw error;
     }
     // link fails rather than replacing any existing backup.
+    assertActive();
     await link(partial, target); await rm(partial); await syncDirectory(o.directory);
     await command(o.replicate, [resolve(target)], { env: hostEnv });
+    assertActive();
     const marker = join(o.directory, '.success.partial');
     await writeFile(marker, JSON.stringify({ completedAt: new Date().toISOString(), archive: name }), { mode: 0o600, flag: 'wx' });
     await rename(marker, join(o.directory, 'last-success.json')); await syncDirectory(o.directory);
@@ -79,9 +91,9 @@ async function backup(o) {
     for (const old of names.slice(7)) if (Date.now() - Number(old.split('-')[1]) > 30 * day) {
       await privatePath(join(o.directory, old)); await rm(join(o.directory, old));
     }
-    console.info('Protected backup and replication completed.');
+    assertActive(); console.info('Protected backup and replication completed.');
   } finally {
-    source?.cancel();
+    await source?.cancel();
     await rm(partial, { force: true });
     await rm(join(o.directory, '.success.partial'), { force: true });
     await rm(join(o.directory, '.backup-lock'), { recursive: true });
@@ -93,7 +105,7 @@ async function status(o) {
   const info = JSON.parse(await readFile(marker, 'utf8')), age = Date.now() - Date.parse(info.completedAt);
   if (!archiveName.test(info.archive) || !Number.isFinite(age) || age < 0 || age > 26 * 3600000) throw new Error('stale');
   await privatePath(join(o.directory, info.archive));
-  console.info('Protected replicated backup is current.');
+  assertActive(); console.info('Protected replicated backup is current.');
 }
 async function restore(o) {
   const key = await readKey(o.key), parent = resolve(o.output, '..');
@@ -102,7 +114,7 @@ async function restore(o) {
   await mkdir(o.output, { mode: 0o700 });
   const staging = join(o.output, 'authenticated.payload');
   const name = `jader-recovery-${randomBytes(12).toString('hex')}`;
-  let created = false, success = false;
+  let creationAttempted = false, success = false;
   try {
     const { metadata, offset } = await unseal(o.archive, staging, key);
     // A mutable tag may have moved since the backup. The preserved immutable
@@ -113,14 +125,16 @@ async function restore(o) {
     const environment = join(o.output, 'recovery.env');
     await writeFile(environment, envText({ POSTGRES_USER: 'jader_bootstrap', POSTGRES_DB: 'jader_market', POSTGRES_PASSWORD: password,
       JADER_OWNER_PASSWORD: randomBytes(32).toString('hex'), JADER_RUNTIME_PASSWORD: randomBytes(32).toString('hex'), AUTH_SECRET: metadata.authSecret }), { mode: 0o600, flag: 'wx' });
+    await writeFile(join(o.output, 'pending-restore.json'), JSON.stringify({ container: name, imageId: metadata.imageId }), { mode: 0o600, flag: 'wx' });
+    creationAttempted = true;
     await docker(['create', '--name', name, '--network', 'none', '--label', 'jader.recovery=isolated', '--env-file', environment,
       '--mount', `type=bind,src=${resolve('deploy/init-db.sh')},dst=/docker-entrypoint-initdb.d/10-roles.sh,readonly`,
       'postgres:17.6-alpine', 'postgres', '-c', 'log_statement=none', '-c', 'log_min_error_statement=panic', '-c', 'log_min_messages=panic']);
-    created = true; await docker(['start', name]);
+    await docker(['start', name]);
     let ready = false;
     for (let i=0; i<60; i++) {
       try { await docker(['exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', 'jader_bootstrap', '-d', 'jader_market']); ready = true; break; }
-      catch { await new Promise(r => setTimeout(r, 1000)); }
+      catch { assertActive(); await new Promise(r => setTimeout(r, 1000)); }
     }
     if (!ready) throw new Error('database_unavailable');
     await docker(['exec', '-i', name, 'pg_restore', '-U', 'jader_bootstrap', '-d', 'jader_market', '--role=jader_owner', '--no-owner', '--no-acl', '--exit-on-error', '--single-transaction'], { input: createReadStream(staging, { start: offset }) });
@@ -137,13 +151,25 @@ async function restore(o) {
     await app(runtimeFile, 'scripts/recovery-check.ts');
     // A pre-incident snapshot can resurrect revoked sessions. Always invalidate them.
     await docker(['exec', '-i', name, 'psql', '-U', 'jader_owner', '-d', 'jader_market', '-v', 'ON_ERROR_STOP=1'], { input: Readable.from(['BEGIN; DELETE FROM sessions; COMMIT;']) });
+    assertActive();
     await writeFile(join(o.output, 'restore.json'), JSON.stringify({ container: name, image: metadata.image, imageId: metadata.imageId, backupStartedAt: metadata.startedAt, sessionsRevoked: true, internalChecks: 'pass', externalPayments: 'not_checked' }), { mode: 0o600, flag: 'wx' });
-    success = true;
+    await rm(join(o.output, 'pending-restore.json'));
+    assertActive(); success = true;
     console.info('Isolated restore verified; sessions revoked. External payment reconciliation and cutover approval remain required.');
   } finally {
     await rm(staging, { force: true });
     if (!success) {
-      if (created) await docker(['rm', '-fv', name]);
+      // Docker may have accepted create before its client failed or was stopped.
+      // Query only our exact random name and ownership label, even on cancellation.
+      if (creationAttempted) {
+        const ids = (await runCommand('docker', ['ps', '-aq', '--filter', `name=^/${name}$`, '--filter', 'label=jader.recovery=isolated'], { env: hostEnv, capture: true })).trim();
+        if (ids) {
+          if (!/^[a-f0-9]{12,64}$/.test(ids)) throw new Error('recovery_cleanup_identity');
+          await runCommand('docker', ['rm', '-fv', ids], { env: hostEnv });
+        }
+      }
+      // If Docker cleanup fails, preserve the private credentials and container
+      // identity so the operator can finish cleanup when the daemon recovers.
       await rm(o.output, { recursive: true, force: true });
     }
   }
@@ -158,4 +184,7 @@ try {
 } catch {
   console.error('Backup/recovery failed. Check private configuration, key custody, storage, Docker and the recovery runbook; no clearance issued.');
   process.exitCode = 1;
+} finally {
+  process.removeListener('SIGINT', interrupt);
+  process.removeListener('SIGTERM', interrupt);
 }
