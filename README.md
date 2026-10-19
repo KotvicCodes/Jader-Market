@@ -97,7 +97,7 @@ The UI also runs without a database and displays an honest unavailable state. `/
 
 ## Production deployment
 
-Read [Production deployment and operations](docs/PRODUCTION_DEPLOYMENT.md) for the isolated app/worker/database/proxy deployment, restricted runtime grants, HTTPS acceptance, safe worker monitoring and alert setup. `npm run test:deployment` rehearses the stack with disposable synthetic data. Actual-host acceptance, backup/restore (item 7), and browser/load checks remain required.
+Read [Production deployment and operations](docs/PRODUCTION_DEPLOYMENT.md) for the isolated app/worker/database/proxy deployment, restricted runtime grants, HTTPS acceptance, safe worker monitoring and alert setup. `npm run test:deployment` rehearses the stack with disposable synthetic data. [Backup/restore](docs/BACKUP_RECOVERY.md) and [browser/load acceptance](docs/PILOT_ACCEPTANCE.md) are implemented for local rehearsal; actual-host acceptance of deployment, recovery and capacity remains required.
 
 ## Verification
 
@@ -111,18 +111,11 @@ npm run test:http
 
 Create the dedicated test database once. Integration tests require a `TEST_DATABASE_URL` ending in `_test` and only use synthetic records. Browsing, bootstrap, market lifecycle and HTTP checks create and drop disposable databases, so the test role needs CREATEDB permission. Other integration suites retain synthetic fixtures in the dedicated test database. HTTP migrations and synthetic account records never modify the configured control database. Never use a database containing records you want to retain. CI runs checks with a disposable PostgreSQL service. HTTP checks start the verified production build on loopback port 3107, run account/MFA/credit/market/trading/privacy workflows using synthetic accounts, verify the built version, and stop it automatically.
 
-### Browser and load acceptance status
+### Browser and load acceptance
 
-Additional checks of [PR #11](https://github.com/KotvicCodes/Jader-Market/pull/11) on 2026-10-18 used a local production build and disposable accounts/data. These were one-off checks, not browser or load suites run by `npm run verify`:
+Run `npm run test:browser` and `npm run test:load` after building the production application and installing Playwright's Chromium. The disposable rehearsals cover administrator and two-participant workflows on desktop, mobile/touch and keyboard projects, accessibility/reflow, committed-response recovery, exact balances/payouts, worker restart and reconciliation. The load profile uses 20 participants, 10 concurrent users and 1,000 genuine historical fills. See [pilot acceptance](docs/PILOT_ACCEPTANCE.md) for prerequisites, thresholds and retained evidence.
 
-- **Completed:** Chromium 154 and WebKitGTK 2.52.6 engine checks covered keyboard trade confirmation and refreshed results. WebKit also covered sign-in, failed reads, browser Back, and explicit recovery after a committed mutation's response was lost; Chromium covered session revocation. Market and populated portfolio pages passed automated accessibility scans. A keyboard focus defect in scrolling tables was corrected and retested.
-- **Layout coverage:** Chromium checks at 320, 390, 412 and 1440 CSS pixels found no page-level horizontal overflow. WebKitGTK's minimum actual window width was 447 pixels. These are engine and viewport checks, not native Android/iOS, Chrome, Brave or Safari certification.
-- **Still unverified:** native Android and iOS browsers/devices, desktop Firefox, Brave and Safari, and screen-reader usability. Firefox's test binary download was blocked; the other native targets were unavailable. Automated accessibility scans and keyboard checks do not establish complete accessibility compliance.
-- **Local load only:** short stages simulated 25, 50 and 100 participants polling market and portfolio snapshots every 10 seconds, with two mint operations per second across a 100-account fixture pool. Reconnect bursts reached 200 simultaneous reads. All 1,964 requests succeeded, and 240 unique mints plus 24 retries reconciled with balances, holdings and the ledger. This does not establish sustained production capacity or load performance for heavy order matching or bulk settlement.
-
-Remaining browser risks can affect transactions, not only appearance: mobile tab suspension, connectivity loss, sessions and browser storage can disrupt freshness or pending-request recovery. Before expanding beyond a small pilot with fictional credits, check an actual iPhone with Safari and an Android phone with Chrome: sign in, confirm a trade, background/reopen the browser, disconnect/reconnect, and verify balances and recovery of an unconfirmed request. Complete the remaining browser/device and operational acceptance before real-money operation.
-
-For a production build, run `npm run build`, configure the trusted proxy as described above, and run `npm start`. Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Trading is available through authenticated APIs and reviewed participant controls, and operator reconciliation is implemented. Production deployment/recovery and browser/load acceptance remain outstanding. Direct oracle resolution and collateral-funded payouts are implemented.
+For production setup, follow [deployment](docs/PRODUCTION_DEPLOYMENT.md), [backup/recovery](docs/BACKUP_RECOVERY.md) and the current [readiness checklist](docs/READINESS.md). Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Physical devices, assistive technology, public-network latency, intended-host capacity, alert delivery and independent backup/key custody still need operator acceptance.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
 
@@ -131,13 +124,13 @@ Development dependency overrides replace the Next.js lint plugin's glob dependen
 - Price history and watchlists for community markets.
 - Portfolio valuation and advanced market charts.
 - Pending incoming offline-credit requests.
-- Private notifications and deployment/backup verification.
+- Private notifications.
 
 ## Next steps
 
-1. Merge and rehearse the feature stack in staging, including [operator reconciliation](docs/OPERATOR_RECONCILIATION.md) (readiness item 5).
-2. Prove deployment, backups and recovery (items 6–7).
-3. Complete the remaining native browser/device, assistive-technology and sustained deployment-load acceptance before real-money operation (item 8).
+1. Rehearse the complete fictional-credit workflow and [operator reconciliation](docs/OPERATOR_RECONCILIATION.md) on the intended deployment.
+2. Accept the actual host, alert delivery, independent backups/key custody and recovery time.
+3. Complete physical-device, assistive-technology and public-network/load acceptance before real-money operation.
 
 Use synthetic data during development. Community trading tests should use explicitly created test markets; the seeded browsing examples are not tradable. Never commit credentials, real account information, payment records, exports, or agent instructions.
 

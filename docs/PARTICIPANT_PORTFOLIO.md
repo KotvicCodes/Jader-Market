@@ -1,6 +1,6 @@
 # Participant portfolio
 
-Readiness checklist item 3 is implemented in PR #10 (0.1.10), stacked on PR #9. Merge/deployment and interactive desktop/mobile/keyboard acceptance remain pending. This does not establish real-money readiness; follow the remaining numbered launch gates in [the audit](READINESS_REVIEW_2026-10-17.md#numbered-launch-checklist--real-money--offline-payments).
+The private portfolio implements readiness item 3. Automated desktop, mobile/touch and keyboard workflows are provided by [pilot acceptance](PILOT_ACCEPTANCE.md). Follow the remaining operator checks in [readiness](READINESS.md#launch-checklist).
 
 ## Read your account
 
@@ -26,4 +26,4 @@ Portfolio and market controls use the same per-account/market pending request in
 
 Use fictional credits in isolated staging. Follow the [two-participant trading rehearsal](PARTICIPANT_TRADING.md#two-participant-rehearsal), checking both portfolios after mint, partial fill, cancellation and burn. Check reservations while a withdrawal is pending, then after cancellation/payment. Close and resolve YES, NO and invalid test markets; run the worker and verify the credit changes, removed holdings and persistent receipts. Page older history and cancel an order older than the latest history page. Confirm the other account's data stays private and an interrupted cancellation can be recovered with the same reference.
 
-This segment adds no migration or dependencies. It requires the PR #9 base and the reserved-withdrawal schema through migration `0006`. Follow its stop/migrate/restart procedure when upgrading from an earlier schema. Automated tests cover reconciliation, concurrent snapshot consistency, pagination, privacy, settlement and cancellation recovery; interactive browser acceptance remains a deployment gate.
+Apply all committed migrations using the stop/migrate/restart procedure in [production deployment](PRODUCTION_DEPLOYMENT.md). Automated tests cover reconciliation, concurrent snapshot consistency, pagination, privacy, settlement and cancellation recovery. Repeat the rehearsal on the intended deployment and physical devices before operator acceptance.

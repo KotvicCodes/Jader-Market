@@ -1,6 +1,6 @@
 # Automatic refresh and reconnect handling
 
-Readiness item 4 is implemented in PR #11 (0.1.11), stacked on PR #10. No schema migration or new dependency is introduced. Deployment and interactive desktop/mobile/keyboard acceptance remain pending; [operator reconciliation](OPERATOR_RECONCILIATION.md) implements item 5; deployment security, recovery and load acceptance remain launch gates.
+Bounded automatic refresh and safe retries implement readiness item 4. [Pilot acceptance](PILOT_ACCEPTANCE.md) exercises desktop, mobile/touch and keyboard workflows. The remaining deployment, device and operator checks are listed in [readiness](READINESS.md).
 
 ## What refreshes
 
@@ -31,4 +31,4 @@ There is **no automatic mutation retry**. A lost response remains unconfirmed ev
 
 In isolated staging with fictional credits, use the [two-participant rehearsal](PARTICIPANT_TRADING.md#two-participant-rehearsal). Keep both markets/portfolios active and verify fills/reservations appear without reload. Leave a ticket draft open during polling. Prepare a review, change the book/balance through the other session, and verify a fresh review is required. Pause, close and expire markets/orders; verify status/controls and worker-released reservations update. Resolve YES, NO and invalid markets; verify evidence, credits, removed holdings and receipts update.
 
-Disconnect with a saved uncertain request. Confirm the stale warning, blocked submissions and retained reference. Reconnect and verify GET refreshes without a POST; explicitly replay the original request. Hide/show the tab and restore browser history. Expire/revoke a session and switch accounts, checking private-data hiding and expected-owner rejection. Cancel while another participant fills the last shares, then refresh/reload and recover the saved cancellation from the portfolio. Finally exercise narrow-screen and keyboard use and measure polling/worker load. These interactive checks remain unverified in this environment because the collaborative preview cannot reach the local server.
+Disconnect with a saved uncertain request. Confirm the stale warning, blocked submissions and retained reference. Reconnect and verify GET refreshes without a POST; explicitly replay the original request. Hide/show the tab and restore browser history. Expire/revoke a session and switch accounts, checking private-data hiding and expected-owner rejection. Cancel while another participant fills the last shares, then refresh/reload and recover the saved cancellation from the portfolio. Finally exercise narrow-screen and keyboard use and measure polling/worker load. The automated browser suite covers the core lifecycle; repeat these additional reconnect and session scenarios on the intended devices and deployment.
