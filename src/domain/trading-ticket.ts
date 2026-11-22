@@ -36,7 +36,7 @@ export function requestSummary(request: TradingRequest): string[] {
     const { quantity } = request.body;
     const amount = formatCredits(BigInt(quantity) * creditTicks);
     return request.action === "mint"
-      ? [`Mint ${quantity} complete sets: receive ${quantity} YES and ${quantity} NO shares.`, `Cost: ${amount} credits from your available balance, locked as market collateral.`]
+      ? [`Mint ${quantity} complete ${quantity === "1" ? "set" : "sets"}: receive ${quantity} YES and ${quantity} NO shares.`, `Cost: ${amount} credits from your available balance, locked as market collateral.`]
       : [`Burn ${quantity} available YES and ${quantity} available NO shares.`, `Return: ${amount} credits from market collateral. Shares reserved in orders cannot be burned.`];
   }
   // Narrow the request explicitly because mint/burn share a union member.
@@ -68,7 +68,7 @@ export const tradingRejections: Record<string, string> = {
 export function tradingResult(request: TradingRequest, data: Record<string, unknown>): string {
   if (request.action === "mint" || request.action === "burn") {
     if (data.operationKey !== request.body.operationKey || data.action !== request.action || data.quantity !== request.body.quantity) throw new Error("Unrecognized result");
-    return `${request.action === "mint" ? "Minted" : "Burned"} ${data.quantity} complete sets.`;
+    return `${request.action === "mint" ? "Minted" : "Burned"} ${data.quantity} complete ${data.quantity === "1" ? "set" : "sets"}.`;
   }
   const order = data.order as { id?: unknown; status?: unknown; quantity?: unknown; remaining?: unknown; reason?: unknown } | undefined;
   if (!order || order.id !== (request.action === "cancel" ? request.body.orderId : request.body.operationKey) || !["open", "filled", "cancelled", "expired"].includes(String(order.status)) || typeof order.quantity !== "string" || !/^[1-9][0-9]{0,6}$/.test(order.quantity) || typeof order.remaining !== "string" || !/^(0|[1-9][0-9]{0,6})$/.test(order.remaining)) throw new Error("Unrecognized result");

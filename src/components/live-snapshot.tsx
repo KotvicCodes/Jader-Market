@@ -107,15 +107,18 @@ export function useLiveSnapshot<T>(initial: T, loadedAt: string, load: (signal: 
 
 export function SnapshotStatus({ live, label }: { live: { checkedAt: string; phase: Phase; fetching: boolean; refresh: () => void }; label: string }) {
   const text: Record<Phase, string> = {
-    current: "Automatic updates are on. Orders and quotes can change before confirmation.",
+    current: "Live updates are on.",
     checking: "Checking current state. Trading submissions wait for a fresh snapshot.",
     offline: "You are offline. Displayed data may be out of date. Reconnect to check current state; saved requests will not be submitted automatically.",
     hidden: "Automatic updates are paused while this tab is hidden. Current state will be checked when you return.",
     error: "Updates could not be confirmed. Displayed data may be out of date. Retrying with a bounded delay; trading submissions are paused.",
     session: "Your session ended or your account changed. Private data is hidden. Sign in, then reload this page to recover any saved request in this tab.",
   };
-  return <section className="notice" aria-label="Live update status"><p role="status">{text[live.phase]}</p><p className="muted">Last successful snapshot: {live.checkedAt.slice(0, 19).replace("T", " ")} UTC. Active tabs check every 10 seconds.</p>
+  const warning = !["current", "checking"].includes(live.phase);
+  return <section className={`snapshot-status${warning ? " snapshot-status-warning" : ""}`} aria-label="Live update status"><div className="snapshot-status-copy"><p role="status">{text[live.phase]}</p><p className="snapshot-checked">Checked <time dateTime={live.checkedAt}>{live.checkedAt.slice(0, 19).replace("T", " ")} UTC</time> · Every 10 seconds</p>
     <noscript><p>Enable JavaScript for automatic updates. Otherwise reload to see later activity.</p></noscript>
+    </div><div className="snapshot-status-actions">
     {live.phase === "session" ? <><Link className="button" href="/account">Sign in or check account</Link> <button type="button" className="secondary-button" onClick={() => window.location.reload()}>Reload page</button></> : <button type="button" className="secondary-button" disabled={live.fetching} onClick={live.refresh}>{live.fetching ? "Refreshing…" : `Refresh ${label}`}</button>}
+    </div>
   </section>;
 }
