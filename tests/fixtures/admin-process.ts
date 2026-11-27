@@ -12,7 +12,7 @@ export async function runAdministrator(directory: string, inputs: string[], opti
         ...process.env,
         AUTH_SECRET: options.secret ?? "",
         DATABASE_URL: options.databaseUrl ?? "postgresql://synthetic:synthetic@127.0.0.1:1/synthetic",
-        NODE_OPTIONS: ["admin-terminal", "block-native-transpiler"].map(name => `--import=${pathToFileURL(resolve(`tests/fixtures/${name}.mjs`)).href}`).join(" "),
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, ...["admin-terminal", "block-native-transpiler"].map(name => `--import=${pathToFileURL(resolve(`tests/fixtures/${name}.mjs`)).href}`)].filter(Boolean).join(" "),
         FORCE_COLOR: "0",
       },
       stdio: "pipe",

@@ -84,7 +84,13 @@ test('administrator and two participants complete the fictional-credit pilot',as
     await click(setup.getByRole('button',{name:'Enable authenticator'}));await expect(admin.getByText('Your authenticator is enabled.')).toBeVisible();
     await admin.goto('/admin');
     for(const name of ['seller','buyer']){
-      const create=panel(admin,'Create participant');await fill(create.getByLabel('Handle'),handle(name));await fill(create.getByLabel('Initial password'),password);
+      const create=panel(admin,'Create participant');
+      const handleInput=create.getByLabel('Handle');
+      await fill(handleInput,'invalid!handle');
+      expect(await handleInput.evaluate(node=>(node as HTMLInputElement).validity.patternMismatch)).toBe(true);
+      await fill(handleInput,`${info.project.name}-valid_handle`);
+      expect(await handleInput.evaluate(node=>(node as HTMLInputElement).validity.valid)).toBe(true);
+      await fill(handleInput,handle(name));await fill(create.getByLabel('Initial password'),password);
       await click(create.getByRole('button',{name:'Create account'}));await expect(admin.getByText(handle(name),{exact:true}).first()).toBeVisible();
       const credits=panel(admin,'Credit adjustment');await select(credits.getByLabel('Account on this page'),await credits.getByRole('option',{name:handle(name),exact:true}).getAttribute('value')??'');
       await fill(credits.getByLabel('Amount in credits'),'100');await check(credits.getByRole('checkbox'));await click(credits.getByRole('button',{name:'Confirm adjustment'}));
@@ -104,6 +110,16 @@ test('administrator and two participants complete the fictional-credit pilot',as
     phase('participant sign-in and lost-response recovery');
     await signIn(seller,handle('seller'));await signIn(buyer,handle('buyer'));
     await seller.goto(marketPath!);await buyer.goto(marketPath!);
+    const operation=seller.getByRole('form',{name:'Trading ticket'}).getByLabel('Operation');
+    await expect(operation).toBeEnabled();
+    // The first trading control must be reachable in the initial viewport, including mobile.
+    const operationBox=await operation.boundingBox();
+    expect(operationBox).not.toBeNull();
+    expect(operationBox!.y).toBeGreaterThanOrEqual(0);
+    expect(operationBox!.y+operationBox!.height).toBeLessThanOrEqual(seller.viewportSize()!.height);
+    expect(await seller.locator('#market-trade').evaluate(node=>Boolean(node.compareDocumentPosition(document.querySelector('#market-book')!)&Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+    await expect(seller.getByRole('button',{name:'Refresh trading state'})).toHaveCount(0);
+    await expect(seller.getByRole('button',{name:'Refresh market'})).toHaveCount(1);
     // Lose the response AFTER the server commits. Recover through the ordinary UI.
     await seller.route('**/api/trading/mint',async route=>{await route.fetch();await route.abort('failed');},{times:1});
     await trade(seller,'mint','5');await expect(seller.getByRole('region',{name:'Unconfirmed trading request'})).toBeVisible();

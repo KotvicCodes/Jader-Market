@@ -67,6 +67,26 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .market-table .market-question { white-space:normal; min-width:240px; max-width:600px; overflow-wrap:anywhere; }.market-question p { margin:4px 0 0; font-size:12px; }
 
 .market-trading-sidebar { min-width:0; }
+.market-page .back { margin-bottom:8px; }
+.market-page .page-heading { margin:8px 0 12px; }
+.market-links { gap:12px 20px; margin-bottom:16px; }
+.market-links a { color:var(--accent); text-decoration:underline; text-underline-offset:3px; }
+.market-page [id] { scroll-margin-top:16px; }
+.market-page [tabindex="-1"]:focus-visible { outline:3px solid var(--accent); outline-offset:4px; }
+.market-layout { display:grid; grid-template-columns:minmax(320px,1fr) minmax(0,1.5fr); align-items:start; gap:22px; }
+.trade-note { font-size:13px; margin-bottom:12px; }
+.trading-balances { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0; }
+.trading-balances dt { color:var(--muted); font-size:13px; }
+.trading-balances dt span { display:block; font-size:11px; }
+.trading-balances dd { font-size:22px; margin:2px 0 0; overflow-wrap:anywhere; }
+.snapshot-status { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; margin:0 0 20px; border:1px solid var(--border); border-radius:10px; background:var(--panel); color:var(--muted); font-size:13px; }
+.snapshot-status-copy { min-width:0; }
+.snapshot-status p { margin:0; }
+.snapshot-status .snapshot-checked { margin-top:3px; font-size:12px; }
+.snapshot-status-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0; }
+.snapshot-status-actions button,.snapshot-status-actions .button { margin:0; font-size:12px; padding:8px 12px; }
+.snapshot-status-warning { flex-wrap:wrap; background:#1b2930; border-color:#35504f; color:#cde2de; }
+@media(max-width:700px) { .market-layout { grid-template-columns:minmax(0,1fr); }.snapshot-status { align-items:start; }.snapshot-status-actions { max-width:100%; } }
 .trading-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .trading-actions { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }.trading-actions .secondary-button { margin-top:0; }
 .trading-review:focus { outline:2px solid var(--accent); outline-offset:3px; }

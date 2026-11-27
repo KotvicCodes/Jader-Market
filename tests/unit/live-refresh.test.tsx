@@ -62,7 +62,7 @@ describe("authoritative automatic snapshots", () => {
     expect(container.textContent).toContain("Latest 1 fills");
     expect(container.querySelector<HTMLInputElement>('[name="quantity"]')!.value).toBe("3");
     expect(container.querySelector<HTMLInputElement>('[name="price"]')!.value).toBe("0.25");
-    expect(container.querySelectorAll("table")[0].textContent).toContain("Ask0.254");
+    expect(container.querySelector("#market-book table")!.textContent).toContain("Ask0.254");
     market = structuredClone(market); market.trading.status = "paused"; market.account!.portfolio.status = "paused";
     await advance(10_000);
     expect(container.textContent).toContain("administrator has paused");
@@ -209,7 +209,7 @@ describe("authoritative automatic snapshots", () => {
     await act(async () => oldPoll.resolve(response({ ...market, account: { ...market.account!, portfolio: { ...market.account!.portfolio, availableCredits: "1000000" } } })));
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(container.textContent).toContain("Available credits98.00");
-    expect(container.textContent).toContain("Automatic updates are on");
+    expect(container.textContent).toContain("Live updates are on");
   });
 
   it("preserves portfolio cursors while holdings and payout receipts update", async () => {

@@ -8,6 +8,7 @@ import { ticketRequest, tradingRejections } from "../domain/trading-ticket";
 import { creditTicks, formatCredits, maxQuantity } from "../domain/trading-values";
 import { TradingRequestFeedback, useTradingRequest } from "./trading-request";
 import { OpenOrderList } from "./open-order-list";
+import { useSnapshotRefresh } from "./live-snapshot";
 
 type Snapshot = Awaited<ReturnType<typeof tradingSnapshot>>;
 
@@ -29,6 +30,7 @@ export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, sn
   }, [closesAt]);
   const status = deadlinePassed && ["open", "paused"].includes(snapshot.status) ? "closed" : snapshot.status;
   const controller = useTradingRequest(ownerId, marketId, csrf, JSON.stringify({ ...snapshot, status, quoteKey }));
+  const live = useSnapshotRefresh();
   const { locked, busy, refreshing, review, refresh, setReview, setMessage } = controller;
   const open = status === "open";
   const stock = (outcome: string) => snapshot.holdings.find(h => h.outcome === outcome) ?? { available: "0", reserved: "0" };
@@ -56,10 +58,9 @@ export function MarketTrading({ marketId, ownerId, csrf, closesAt, synthetic, sn
 
   return <div className="stack market-trading">
     <section className="panel" aria-labelledby="trade-heading"><h2 id="trade-heading">Trade outcomes</h2>
-      <p className="muted">Your real account credits and shares are used here. The practice demo has a separate balance.</p>
-      <dl className="demo-summary"><div><dt>Available credits</dt><dd>{formatCredits(BigInt(snapshot.availableCredits))}</dd></div><div><dt>Reserved credits, all markets and withdrawals</dt><dd>{formatCredits(BigInt(snapshot.reservedCredits))}</dd></div></dl>
-      <p className="demo-hint muted">Balances and orders update automatically in active tabs. Check the live update status before trading; limit prices remain binding when depth changes.</p>
-      <button type="button" className="secondary-button" disabled={busy || refreshing || Boolean(review)} onClick={refresh}>{refreshing ? "Refreshing…" : "Refresh trading state"}</button>
+      <p className="trade-note muted">Trades use your account credits. Demo balances are separate.</p>
+      <dl className="trading-balances"><div><dt>Available credits</dt><dd>{formatCredits(BigInt(snapshot.availableCredits))}</dd></div><div><dt>Reserved credits<span>All markets and withdrawals</span></dt><dd>{formatCredits(BigInt(snapshot.reservedCredits))}</dd></div></dl>
+      {!live && <button type="button" className="secondary-button" disabled={busy || refreshing || Boolean(review)} onClick={refresh}>{refreshing ? "Refreshing…" : "Refresh trading state"}</button>}
       {synthetic && <p className="notice">Browsing example only. New orders and minting are disabled. Available legacy pairs can still be burned while open.</p>}
       {!open && <p className="notice">{status === "paused" ? "Trading is paused. You can still cancel open orders." : `This market is ${status}. New trades and complete-set operations are unavailable; any remaining open orders can be cancelled.`}</p>}
       {canUseTicket && <form className="member-form" aria-label="Trading ticket" onSubmit={prepare}>

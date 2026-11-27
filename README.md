@@ -16,7 +16,7 @@ npm run dev
 
 `admin:create` runs in an interactive terminal. Choose a handle and a password of 12 to 128 characters; passwords are hidden and never passed as command arguments. It validates the handle and matching passwords, checks the current schema and existing administrator, and serializes operator setup before generating a private `AUTH_SECRET` in `.env` if needed. Failed setup restores any generated configuration. An empty exported `AUTH_SECRET` must be removed before using a saved `.env` key; setup never replaces a masked saved key. It then creates the sole administrator with zero credits. There are no default sign-in credentials. Restart the app after initial setup so it loads the generated key.
 
-Administrator setup/recovery, migrations, seeding, reconciliation, and the worker use the existing JavaScript TypeScript compiler, without loading tsx or esbuild. Use the pinned Node.js 22.22.1 version. This lets those commands start even when a shared checkout contains dependencies installed on another operating system. Development, builds, and test tooling still need dependencies installed for their host: if esbuild or another native dependency reports a Linux/macOS mismatch, stop the app and run `npm ci` on that host. Avoid sharing `node_modules` between Linux and macOS checkouts. Neither reinstalling dependencies nor these script changes remove `.env` or database data.
+Administrator setup/recovery, migrations, seeding, reconciliation, and the worker use the existing JavaScript TypeScript compiler, without loading tsx or esbuild. Use the pinned Node.js 22.23.5 version. This lets those commands start even when a shared checkout contains dependencies installed on another operating system. Development, builds, and test tooling still need dependencies installed for their host: if esbuild or another native dependency reports a Linux/macOS mismatch, stop the app and run `npm ci` on that host. Avoid sharing `node_modules` between Linux and macOS checkouts. Neither reinstalling dependencies nor these script changes remove `.env` or database data.
 
 1. Open `/account`, sign in, and enable your authenticator using the private setup key and a six-digit code. The authenticator uses standard time-based codes (SHA-1, six digits, 30 seconds).
 2. Open `/admin` and create a participant. New accounts always start with zero credits. Give the initial password to that participant privately; they can change it on `/account`.
@@ -79,7 +79,7 @@ The stack is TypeScript, Next.js, PostgreSQL, and Drizzle. The prototype is inte
 
 ## Local development
 
-Use Node.js 22.22.1, npm 11.21.0, and Docker Compose. Run these commands inside the repository:
+Use Node.js 22.23.5, npm 11.21.3, and Docker Compose. Run these commands inside the repository:
 
 ```sh
 cp .env.example .env
@@ -118,6 +118,8 @@ Run `npm run test:browser` and `npm run test:load` after building the production
 For production setup, follow [deployment](docs/PRODUCTION_DEPLOYMENT.md), [backup/recovery](docs/BACKUP_RECOVERY.md) and the current [readiness checklist](docs/READINESS.md). Project commands disable Next.js telemetry and keep temporary compiler files in `.cache/tmp`. Physical devices, assistive technology, public-network latency, intended-host capacity, alert delivery and independent backup/key custody still need operator acceptance.
 
 Development dependency overrides replace the Next.js lint plugin's glob dependency with `tinyglobby` and use a patched esbuild version for migration/test tools. npm 11 is required to resolve the alias override. The install-script allowlist permits only the pinned native compiler and resolver installers.
+
+Dependency updates stay within the supported toolchain: `@types/node` follows Node 22, and TypeScript stays on the 6.0 line. TypeScript 7 removes the JavaScript compiler API used by the portable operator loader and is outside the lint parser's supported TypeScript range. Moving to its native compiler requires a separate migration; installing it as a routine version bump would break operator commands.
 
 ## Planned capabilities
 

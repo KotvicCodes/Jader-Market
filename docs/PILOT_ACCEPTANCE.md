@@ -57,7 +57,7 @@ The [retained aggregate](acceptance/item8-local-load.json) passed on 19 October 
 
 Type checking, lint, 222 unit/component tests, 130 PostgreSQL integration tests, the fresh production build, restricted-role HTTP workflows, all three browser projects and the interruption lifecycle check passed. The Dockerfile completed a fresh dependency install/build; HTTPS deployment and isolated backup/restore rehearsals passed with that artifact. The dependency audit reported zero known vulnerabilities. Full-profile fault checks rejected all 60 mismatched order quantities and an 8.1-second oldest-payout delay, while exact financial state and reconciliation still passed.
 
-Local verification uses Node 22.22.1, npm 11.21.0, PostgreSQL 17.6 and Linux ARM64. Browser checks use the documented Chromium 153 override; CI installs Playwright's pinned browser. Local commands reuse dependencies with a byte-identical lockfile because the shared filesystem lacks space for another complete installation. A fresh dependency install and production build are independently checked through the Dockerfile.
+The retained October verification used Node 22.22.1, npm 11.21.0, PostgreSQL 17.6 and Linux ARM64. Those browser checks used the documented Chromium 153 override; CI installs Playwright's pinned browser. Local commands reused dependencies with a byte-identical lockfile because the shared filesystem lacked space for another complete installation. A fresh dependency install and production build were independently checked through the Dockerfile. For a new run, use the current Node/npm pins in the README and `.nvmrc`.
 
 A clock discontinuity invalidates timing evidence and requires a fresh run. Failed runs remain failures; they are not capacity sign-off.
 
