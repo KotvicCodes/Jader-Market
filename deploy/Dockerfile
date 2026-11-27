@@ -1,6 +1,6 @@
-FROM node:22.22.1-bookworm-slim AS dependencies
+FROM node:22.23.5-bookworm-slim AS dependencies
 WORKDIR /app
-RUN npm install --global npm@11.21.0
+RUN npm install --global npm@11.21.3
 COPY package.json package-lock.json .npmrc ./
 RUN --mount=type=cache,target=/app/.cache/npm npm ci --fetch-timeout=60000 --fetch-retries=2
 
@@ -9,7 +9,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 RUN npm run build
 
-FROM node:22.22.1-bookworm-slim AS runtime
+FROM node:22.23.5-bookworm-slim AS runtime
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 COPY --from=dependencies /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
